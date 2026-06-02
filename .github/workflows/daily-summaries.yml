@@ -1,0 +1,36 @@
+name: Daily Summaries
+
+# Replaces the unreliable in-process node-cron (src/instrumentation.ts), which
+# silently skipped runs whenever Fly suspended the idle machine. This external
+# trigger wakes the machine via the HTTP request and runs the job regardless of
+# process state.
+
+on:
+  schedule:
+    # 21:30 UTC, Mon-Fri — safely after US market close in both EST and EDT.
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/cron/daily-summaries
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt..."
+            status=$(curl -sS -o /tmp/body -w '%{http_code}' \
+              --max-time 180 -X POST \
+              -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+              https://portseido-lite.fly.dev/api/cron/daily-summaries) || status=000
+            echo "HTTP $status"
+            cat /tmp/body || true
+            echo
+            if [ "$status" = "200" ]; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Failed after 3 attempts"
+          exit 1

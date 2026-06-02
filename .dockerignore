@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.idea
+data/*.db
+data/*.db-wal
+data/*.db-shm
+screenshot
+artifact
+doc
+tests
+*.md
+.DS_Store
+.env*
+vitest.config.ts

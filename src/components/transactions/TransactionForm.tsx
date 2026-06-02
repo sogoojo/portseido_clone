@@ -1,0 +1,309 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import type { Transaction, TransactionType, Account } from '@/lib/types';
+
+interface TransactionFormProps {
+  transaction?: Transaction | null;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+const TYPES: TransactionType[] = ['buy', 'sell', 'deposit', 'withdrawal', 'dividend'];
+
+export default function TransactionForm({ transaction, onClose, onSaved }: TransactionFormProps) {
+  const searchParams = useSearchParams();
+  const globalAccount = searchParams.get('account') || 'all';
+  const isEdit = !!transaction;
+
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [type, setType] = useState<TransactionType>(transaction?.type || 'buy');
+  const [accountId, setAccountId] = useState(transaction?.account_id || (globalAccount !== 'all' ? globalAccount : ''));
+  const [date, setDate] = useState(transaction?.date || new Date().toISOString().split('T')[0]);
+  const [ticker, setTicker] = useState(transaction?.ticker || '');
+  const [quantity, setQuantity] = useState(transaction?.quantity?.toString() || '');
+  const [pricePerUnit, setPricePerUnit] = useState(transaction?.price_per_unit?.toString() || '');
+  const [amount, setAmount] = useState(transaction?.amount?.toString() || '');
+  const [currency, setCurrency] = useState(transaction?.currency || '');
+  const [commission, setCommission] = useState(transaction?.commission?.toString() || '0');
+  const [notes, setNotes] = useState(transaction?.notes || '');
+  const [errors, setErrors] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/accounts')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.data) {
+          setAccounts(json.data);
+          // Auto-set currency from selected account
+          if (!currency && accountId) {
+            const acct = json.data.find((a: Account) => a.id === accountId);
+            if (acct) setCurrency(acct.currency);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-set currency when account changes
+  function handleAccountChange(id: string) {
+    setAccountId(id);
+    const acct = accounts.find((a) => a.id === id);
+    if (acct && !currency) setCurrency(acct.currency);
+  }
+
+  const needsTicker = type === 'buy' || type === 'sell' || type === 'dividend';
+  const needsQuantityPrice = type === 'buy' || type === 'sell';
+  const needsAmount = type === 'deposit' || type === 'withdrawal' || type === 'dividend';
+
+  function validate(): string[] {
+    const errs: string[] = [];
+    if (!accountId) errs.push('Account is required');
+    if (!date) errs.push('Date is required');
+    if (!currency) errs.push('Currency is required');
+    if (needsTicker && !ticker) errs.push('Ticker is required');
+    if (needsQuantityPrice) {
+      if (!quantity || parseFloat(quantity) <= 0) errs.push('Quantity must be > 0');
+      if (!pricePerUnit || parseFloat(pricePerUnit) <= 0) errs.push('Price must be > 0');
+    }
+    if (needsAmount && (!amount || parseFloat(amount) <= 0)) errs.push('Amount must be > 0');
+    return errs;
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs = validate();
+    if (errs.length > 0) {
+      setErrors(errs);
+      return;
+    }
+    setErrors([]);
+    setSubmitting(true);
+
+    const body: Record<string, unknown> = {
+      account_id: accountId,
+      date,
+      type,
+      ticker: needsTicker ? ticker.toUpperCase() : null,
+      quantity: needsQuantityPrice ? parseFloat(quantity) : null,
+      price_per_unit: needsQuantityPrice ? parseFloat(pricePerUnit) : null,
+      amount: needsAmount ? parseFloat(amount) : needsQuantityPrice ? parseFloat(quantity) * parseFloat(pricePerUnit) : null,
+      currency,
+      commission: parseFloat(commission) || 0,
+      notes: notes || null,
+    };
+
+    if (isEdit) body.id = transaction!.id;
+
+    try {
+      const res = await fetch('/api/transactions', {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        onSaved();
+        onClose();
+      } else {
+        const json = await res.json();
+        setErrors([json.message || 'Failed to save']);
+      }
+    } catch {
+      setErrors(['Network error']);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {isEdit ? 'Edit Transaction' : 'Add Transaction'}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">
+            &times;
+          </button>
+        </div>
+
+        {errors.length > 0 && (
+          <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+            {errors.map((e, i) => (
+              <div key={i}>{e}</div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Type */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <div className="flex gap-2">
+              {TYPES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setType(t)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
+                    type === t ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Account + Date row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
+              <select
+                value={accountId}
+                onChange={(e) => handleAccountChange(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Select account</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.currency})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Ticker */}
+          {needsTicker && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ticker</label>
+              <input
+                type="text"
+                value={ticker}
+                onChange={(e) => setTicker(e.target.value)}
+                placeholder="e.g. AAPL, BTC-USD, NSENG:MTNN"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          )}
+
+          {/* Quantity + Price */}
+          {needsQuantityPrice && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Price per unit</label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={pricePerUnit}
+                  onChange={(e) => setPricePerUnit(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Amount */}
+          {needsAmount && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          )}
+
+          {/* Currency + Commission row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Select</option>
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="NGN">NGN</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Commission</label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={commission}
+                onChange={(e) => setCommission(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Submit */}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {submitting ? 'Saving...' : isEdit ? 'Update' : 'Add Transaction'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

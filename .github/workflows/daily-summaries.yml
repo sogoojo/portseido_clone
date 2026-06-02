@@ -1,21 +1,37 @@
 name: Daily Summaries
 
-# Replaces the unreliable in-process node-cron (src/instrumentation.ts), which
-# silently skipped runs whenever Fly suspended the idle machine. This external
-# trigger wakes the machine via the HTTP request and runs the job regardless of
-# process state.
+# Triggers /api/cron/daily-summaries on the deployed Fly app. The HTTP request
+# wakes the machine and runs the job, independent of process state (replaces the
+# old in-process node-cron, which silently skipped runs when Fly suspended).
+#
+# Goal: run at exactly 21:00 Europe/London every day. GitHub cron is UTC-only and
+# does NOT follow DST, so we schedule both candidate UTC times and gate on the
+# real London clock — 20:00 UTC hits 21:00 during BST, 21:00 UTC hits 21:00 during
+# GMT. The off-target trigger sees a London hour != 21 and exits without work.
 
 on:
   schedule:
-    # 21:30 UTC, Mon-Fri — safely after US market close in both EST and EDT.
-    - cron: '30 21 * * 1-5'
-  workflow_dispatch: {} # allow manual runs from the Actions tab
+    - cron: '0 20 * * *' # 21:00 London during BST (summer)
+    - cron: '0 21 * * *' # 21:00 London during GMT (winter)
+  workflow_dispatch: {} # manual runs (always execute, ungated)
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
+      - name: Gate to 21:00 Europe/London (scheduled runs only)
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          HOUR=$(TZ='Europe/London' date +%H)
+          echo "London hour is $HOUR"
+          if [ "$HOUR" != "21" ]; then
+            echo "Not 21:00 London — this is the off-DST trigger. Skipping."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+
       - name: POST /api/cron/daily-summaries
+        if: env.SKIP != '1'
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do

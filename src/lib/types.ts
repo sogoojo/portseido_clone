@@ -110,6 +110,14 @@ export interface NewsArticle {
   snippet?: string;
 }
 
+export interface RatingChange {
+  date: string;          // ISO date of the rating action
+  firm: string;
+  from_grade: string;
+  to_grade: string;
+  action: string;        // up | down | init | main | reit
+}
+
 export interface DailySummary {
   ticker: string;
   date: string;
@@ -124,6 +132,21 @@ export interface DailySummary {
   market_cap: number | null;
   currency: string;
   news: NewsArticle[];
+  // Free structured analyst/fundamental signals
+  recommendation_key: string | null;
+  recommendation_mean: number | null;
+  analyst_count: number | null;
+  target_mean: number | null;
+  target_high: number | null;
+  target_low: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  beta: number | null;
+  short_ratio: number | null;
+  fifty_two_week_change: number | null;
+  earnings_surprise_pct: number | null;
+  insider_net_shares: number | null;
+  rating_changes: RatingChange[];
   fetched_at: string;
 }
 

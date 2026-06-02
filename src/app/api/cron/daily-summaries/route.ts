@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { collectDailySummaries } from '@/lib/services/collect-summaries';
+import { runDailySummaries } from '@/lib/services/summaries';
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   const secret = request.headers.get('x-cron-secret');
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await collectDailySummaries();
+    const result = await runDailySummaries();
     return NextResponse.json({ data: result });
   } catch (err) {
     console.error('[Cron/daily-summaries] Error:', err);

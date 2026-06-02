@@ -75,6 +75,21 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
   market_cap REAL,
   currency TEXT NOT NULL,
   news TEXT,
+  -- Free structured analyst/fundamental signals (yahoo-finance2 quoteSummary)
+  recommendation_key TEXT,        -- strong_buy | buy | hold | sell | strong_sell
+  recommendation_mean REAL,       -- 1.0 (buy) .. 5.0 (sell)
+  analyst_count INTEGER,          -- number of analyst opinions
+  target_mean REAL,               -- mean analyst price target
+  target_high REAL,
+  target_low REAL,
+  forward_pe REAL,
+  peg_ratio REAL,
+  beta REAL,
+  short_ratio REAL,
+  fifty_two_week_change REAL,     -- trailing 52w price change (fraction)
+  earnings_surprise_pct REAL,     -- most recent quarter EPS surprise (fraction)
+  insider_net_shares REAL,        -- insider buy shares - sell shares (period)
+  rating_changes TEXT,            -- JSON: recent analyst upgrade/downgrade history
   fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (ticker, date)
 );

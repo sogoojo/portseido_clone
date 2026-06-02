@@ -29,6 +29,21 @@ const migrations = [
   `ALTER TABLE price_cache ADD COLUMN change_pct REAL`,
   `ALTER TABLE accounts ADD COLUMN track_cash INTEGER NOT NULL DEFAULT 1`,
   `UPDATE accounts SET track_cash = 0 WHERE id IN ('trading212', 'degiro', 'morgan-stanley', 'crypto', 'ngx')`,
+  // Free structured analyst/fundamental signals on daily_summaries
+  `ALTER TABLE daily_summaries ADD COLUMN recommendation_key TEXT`,
+  `ALTER TABLE daily_summaries ADD COLUMN recommendation_mean REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN analyst_count INTEGER`,
+  `ALTER TABLE daily_summaries ADD COLUMN target_mean REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN target_high REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN target_low REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN forward_pe REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN peg_ratio REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN beta REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN short_ratio REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN fifty_two_week_change REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN earnings_surprise_pct REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN insider_net_shares REAL`,
+  `ALTER TABLE daily_summaries ADD COLUMN rating_changes TEXT`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch { /* column already exists */ }

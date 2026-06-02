@@ -26,14 +26,27 @@ const POSITIVE_WORDS = new Set([
   'revenue', 'dividend', 'winner', 'best', 'upside', 'opportunity',
 ]);
 
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function daysApart(a: string, b: string): number {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 86400000;
+}
+
+// Composite daily sentiment from price action, news keywords, and free
+// structured analyst/fundamental signals (yahoo-finance2 quoteSummary).
 function scoreSentiment(summary: DailySummary): number {
   let score = 0;
+
+  // 1. Price action
   const pct = summary.change_pct ?? 0;
   if (pct <= -3) score -= 2;
   else if (pct <= -1) score -= 1;
   else if (pct >= 3) score += 2;
   else if (pct >= 1) score += 1;
 
+  // 2. News headline / snippet keywords
   for (const article of summary.news) {
     const words = article.title.toLowerCase().split(/[^a-z]+/);
     for (const w of words) {
@@ -48,6 +61,40 @@ function scoreSentiment(summary: DailySummary): number {
       }
     }
   }
+
+  // 3. Analyst consensus (1=buy .. 5=sell): bullish when below 3
+  if (summary.recommendation_mean != null) {
+    score += clamp(3 - summary.recommendation_mean, -2, 2);
+  }
+
+  // 4. Price-target upside vs current close
+  if (summary.target_mean != null && summary.close) {
+    const upside = (summary.target_mean - summary.close) / summary.close;
+    score += clamp(upside * 10, -2, 2);
+  }
+
+  // 5. Recent analyst rating-change momentum (near this day)
+  let ratingMomentum = 0;
+  for (const rc of summary.rating_changes) {
+    if (rc.date && daysApart(rc.date, summary.date) <= 7) {
+      if (rc.action === 'up') ratingMomentum += 1;
+      else if (rc.action === 'down') ratingMomentum -= 1;
+    }
+  }
+  score += clamp(ratingMomentum, -2, 2);
+
+  // 6. Latest earnings surprise (beat / miss)
+  if (summary.earnings_surprise_pct != null) {
+    if (summary.earnings_surprise_pct >= 0.02) score += 0.5;
+    else if (summary.earnings_surprise_pct <= -0.02) score -= 0.5;
+  }
+
+  // 7. Insider net activity
+  if (summary.insider_net_shares != null) {
+    if (summary.insider_net_shares > 0) score += 0.3;
+    else if (summary.insider_net_shares < 0) score -= 0.3;
+  }
+
   return score;
 }
 
@@ -71,6 +118,9 @@ interface TickerTrend {
   avgScore: number;
   trend: 'improving' | 'worsening' | 'stable';
   dataPoints: { date: string; score: number }[];
+  // Latest structured signals (from the most recent summary in the window)
+  recommendationKey: string | null;
+  targetUpside: number | null; // fraction, e.g. 0.08 = +8% to consensus target
 }
 
 function computeTrends(summaries: DailySummary[]): TickerTrend[] {
@@ -88,6 +138,12 @@ function computeTrends(summaries: DailySummary[]): TickerTrend[] {
     const scores = dataPoints.map(d => d.score);
     const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
 
+    const latest = sorted[sorted.length - 1];
+    const targetUpside =
+      latest.target_mean != null && latest.close
+        ? (latest.target_mean - latest.close) / latest.close
+        : null;
+
     let trend: 'improving' | 'worsening' | 'stable' = 'stable';
     if (scores.length >= 3) {
       const half = Math.floor(scores.length / 2);
@@ -100,7 +156,11 @@ function computeTrends(summaries: DailySummary[]): TickerTrend[] {
       else if (diff <= -1.5) trend = 'worsening';
     }
 
-    trends.push({ ticker, avgScore, trend, dataPoints });
+    trends.push({
+      ticker, avgScore, trend, dataPoints,
+      recommendationKey: latest.recommendation_key ?? null,
+      targetUpside,
+    });
   }
 
   return trends.sort((a, b) => a.avgScore - b.avgScore);
@@ -113,32 +173,32 @@ const TREND_ARROW: Record<string, { icon: string; color: string }> = {
 };
 
 function sentimentColor(avg: number): string {
-  if (avg <= -2) return 'text-red-600';
-  if (avg >= 2) return 'text-green-600';
+  if (avg <= -2.5) return 'text-red-600';
+  if (avg >= 2.5) return 'text-green-600';
   return 'text-amber-600';
 }
 
 function sentimentBg(avg: number): string {
-  if (avg <= -2) return 'bg-red-50';
-  if (avg >= 2) return 'bg-green-50';
+  if (avg <= -2.5) return 'bg-red-50';
+  if (avg >= 2.5) return 'bg-green-50';
   return 'bg-amber-50';
 }
 
 function sentimentLabel(avg: number): string {
-  if (avg <= -2) return 'Bearish';
-  if (avg >= 2) return 'Bullish';
+  if (avg <= -2.5) return 'Bearish';
+  if (avg >= 2.5) return 'Bullish';
   return 'Neutral';
 }
 
 function sparkColor(avg: number): string {
-  if (avg <= -2) return '#dc2626';
-  if (avg >= 2) return '#16a34a';
+  if (avg <= -2.5) return '#dc2626';
+  if (avg >= 2.5) return '#16a34a';
   return '#d97706';
 }
 
 function sparkFill(avg: number): string {
-  if (avg <= -2) return '#fecaca';
-  if (avg >= 2) return '#bbf7d0';
+  if (avg <= -2.5) return '#fecaca';
+  if (avg >= 2.5) return '#bbf7d0';
   return '#fef3c7';
 }
 
@@ -160,11 +220,20 @@ function TrendRow({ trend }: { trend: TickerTrend }) {
 
   return (
     <div className={`flex items-center gap-3 rounded-lg border border-gray-100 px-4 py-3 ${sentimentBg(trend.avgScore)}`}>
-      <div className="w-20 shrink-0">
+      <div className="w-24 shrink-0">
         <p className="text-sm font-semibold text-gray-900">{trend.ticker}</p>
         <p className={`text-[10px] font-medium ${sentimentColor(trend.avgScore)}`}>
           {sentimentLabel(trend.avgScore)}
         </p>
+        {(trend.recommendationKey || trend.targetUpside != null) && (
+          <p className="text-[9px] text-gray-400">
+            {trend.recommendationKey ? trend.recommendationKey.replace('_', ' ') : ''}
+            {trend.recommendationKey && trend.targetUpside != null ? ' · ' : ''}
+            {trend.targetUpside != null
+              ? `${trend.targetUpside >= 0 ? '+' : ''}${(trend.targetUpside * 100).toFixed(0)}%`
+              : ''}
+          </p>
+        )}
       </div>
 
       <div className="w-12 shrink-0 text-center">

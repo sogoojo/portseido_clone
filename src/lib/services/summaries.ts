@@ -1,6 +1,6 @@
 import db from '@/lib/db';
 import YahooFinance from 'yahoo-finance2';
-import type { DailySummary, WatchlistItem, NewsArticle } from '@/lib/types';
+import type { DailySummary, WatchlistItem, NewsArticle, RatingChange } from '@/lib/types';
 
 const yahooFinance = new YahooFinance();
 
@@ -18,6 +18,20 @@ interface SummaryRow {
   market_cap: number | null;
   currency: string;
   news: string | null;
+  recommendation_key: string | null;
+  recommendation_mean: number | null;
+  analyst_count: number | null;
+  target_mean: number | null;
+  target_high: number | null;
+  target_low: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  beta: number | null;
+  short_ratio: number | null;
+  fifty_two_week_change: number | null;
+  earnings_surprise_pct: number | null;
+  insider_net_shares: number | null;
+  rating_changes: string | null;
   fetched_at: string;
 }
 
@@ -26,7 +40,11 @@ function rowToSummary(row: SummaryRow): DailySummary {
   if (row.news) {
     try { news = JSON.parse(row.news); } catch { /* malformed JSON */ }
   }
-  return { ...row, news };
+  let rating_changes: RatingChange[] = [];
+  if (row.rating_changes) {
+    try { rating_changes = JSON.parse(row.rating_changes); } catch { /* malformed JSON */ }
+  }
+  return { ...row, news, rating_changes };
 }
 
 export function getSummaryForDate(ticker: string, date: string): DailySummary | null {
@@ -177,15 +195,116 @@ function deduplicateNews(articles: NewsArticle[]): NewsArticle[] {
   });
 }
 
+// Free structured analyst/fundamental signals from yahoo-finance2 quoteSummary.
+interface Signals {
+  recommendation_key: string | null;
+  recommendation_mean: number | null;
+  analyst_count: number | null;
+  target_mean: number | null;
+  target_high: number | null;
+  target_low: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  beta: number | null;
+  short_ratio: number | null;
+  fifty_two_week_change: number | null;
+  earnings_surprise_pct: number | null;
+  insider_net_shares: number | null;
+  rating_changes: RatingChange[];
+}
+
+const EMPTY_SIGNALS: Signals = {
+  recommendation_key: null, recommendation_mean: null, analyst_count: null,
+  target_mean: null, target_high: null, target_low: null,
+  forward_pe: null, peg_ratio: null, beta: null, short_ratio: null,
+  fifty_two_week_change: null, earnings_surprise_pct: null,
+  insider_net_shares: null, rating_changes: [],
+};
+
+function toISODate(v: unknown): string {
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v ?? '').slice(0, 10);
+}
+
+async function fetchSignals(ticker: string): Promise<Signals> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = await yahooFinance.quoteSummary(ticker, {
+      modules: [
+        'financialData', 'defaultKeyStatistics', 'earningsHistory',
+        'upgradeDowngradeHistory', 'netSharePurchaseActivity',
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any;
+
+    const fd = s.financialData ?? {};
+    const ks = s.defaultKeyStatistics ?? {};
+    const eh: any[] = s.earningsHistory?.history ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const lastEarnings = eh.length ? eh[eh.length - 1] : null;
+    const ns = s.netSharePurchaseActivity ?? {};
+
+    const rating_changes: RatingChange[] = (s.upgradeDowngradeHistory?.history ?? [])
+      .slice(0, 8)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((h: any) => ({
+        date: toISODate(h.epochGradeDate),
+        firm: h.firm ?? '',
+        from_grade: h.fromGrade ?? '',
+        to_grade: h.toGrade ?? '',
+        action: h.action ?? '',
+      }));
+
+    return {
+      recommendation_key: fd.recommendationKey ?? null,
+      recommendation_mean: fd.recommendationMean ?? null,
+      analyst_count: fd.numberOfAnalystOpinions ?? null,
+      target_mean: fd.targetMeanPrice ?? null,
+      target_high: fd.targetHighPrice ?? null,
+      target_low: fd.targetLowPrice ?? null,
+      forward_pe: ks.forwardPE ?? null,
+      peg_ratio: ks.pegRatio ?? null,
+      beta: ks.beta ?? null,
+      short_ratio: ks.shortRatio ?? null,
+      fifty_two_week_change: ks['52WeekChange'] ?? null,
+      earnings_surprise_pct: lastEarnings?.surprisePercent ?? null,
+      insider_net_shares:
+        ns.buyInfoShares != null && ns.sellInfoShares != null
+          ? ns.buyInfoShares - ns.sellInfoShares
+          : null,
+      rating_changes,
+    };
+  } catch {
+    return EMPTY_SIGNALS;
+  }
+}
+
 const upsertSummary = db.prepare(`
-  INSERT INTO daily_summaries (ticker, date, open, high, low, close, previous_close, change, change_pct, volume, market_cap, currency, news, fetched_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  INSERT INTO daily_summaries (
+    ticker, date, open, high, low, close, previous_close, change, change_pct,
+    volume, market_cap, currency, news,
+    recommendation_key, recommendation_mean, analyst_count,
+    target_mean, target_high, target_low, forward_pe, peg_ratio, beta,
+    short_ratio, fifty_two_week_change, earnings_surprise_pct,
+    insider_net_shares, rating_changes, fetched_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   ON CONFLICT(ticker, date) DO UPDATE SET
     open = excluded.open, high = excluded.high, low = excluded.low,
     close = excluded.close, previous_close = excluded.previous_close,
     change = excluded.change, change_pct = excluded.change_pct,
     volume = excluded.volume, market_cap = excluded.market_cap,
     currency = excluded.currency, news = excluded.news,
+    recommendation_key = excluded.recommendation_key,
+    recommendation_mean = excluded.recommendation_mean,
+    analyst_count = excluded.analyst_count,
+    target_mean = excluded.target_mean, target_high = excluded.target_high,
+    target_low = excluded.target_low, forward_pe = excluded.forward_pe,
+    peg_ratio = excluded.peg_ratio, beta = excluded.beta,
+    short_ratio = excluded.short_ratio,
+    fifty_two_week_change = excluded.fifty_two_week_change,
+    earnings_surprise_pct = excluded.earnings_surprise_pct,
+    insider_net_shares = excluded.insider_net_shares,
+    rating_changes = excluded.rating_changes,
     fetched_at = datetime('now')
 `);
 
@@ -200,9 +319,10 @@ async function processTicker(ticker: string, date: string): Promise<boolean> {
     const meta = db.prepare('SELECT name FROM ticker_metadata WHERE ticker = ?')
       .get(ticker) as { name: string } | undefined;
 
-    const [yahooNews, braveNews] = await Promise.all([
+    const [yahooNews, braveNews, signals] = await Promise.all([
       fetchYahooNews(ticker),
       fetchBraveNews(ticker, meta?.name || undefined),
+      fetchSignals(ticker),
     ]);
     const allNews = deduplicateNews([...yahooNews, ...braveNews]);
 
@@ -219,6 +339,20 @@ async function processTicker(ticker: string, date: string): Promise<boolean> {
       quote.marketCap ?? null,
       quote.currency || 'USD',
       JSON.stringify(allNews),
+      signals.recommendation_key,
+      signals.recommendation_mean,
+      signals.analyst_count,
+      signals.target_mean,
+      signals.target_high,
+      signals.target_low,
+      signals.forward_pe,
+      signals.peg_ratio,
+      signals.beta,
+      signals.short_ratio,
+      signals.fifty_two_week_change,
+      signals.earnings_surprise_pct,
+      signals.insider_net_shares,
+      JSON.stringify(signals.rating_changes),
     );
     return true;
   } catch {

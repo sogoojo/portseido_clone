@@ -98,6 +98,22 @@ function formatVolume(value: number | null): string {
   return value.toString();
 }
 
+function formatRating(key: string | null): string | null {
+  if (!key) return null;
+  return key
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+const RATING_STYLES: Record<string, string> = {
+  strong_buy: 'bg-green-100 text-green-700',
+  buy: 'bg-green-50 text-green-700',
+  hold: 'bg-amber-100 text-amber-700',
+  underperform: 'bg-red-50 text-red-700',
+  sell: 'bg-red-100 text-red-700',
+};
+
 function NewsItem({ article }: { article: NewsArticle }) {
   return (
     <li className="text-xs">
@@ -118,6 +134,16 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
   const [expanded, setExpanded] = useState(false);
   const isPositive = (summary.change_pct ?? 0) >= 0;
   const styles = SENTIMENT_STYLES[sentiment];
+
+  const rating = formatRating(summary.recommendation_key);
+  const ratingStyle = summary.recommendation_key
+    ? RATING_STYLES[summary.recommendation_key] ?? 'bg-gray-100 text-gray-600'
+    : '';
+  const upside =
+    summary.target_mean != null && summary.close
+      ? (summary.target_mean - summary.close) / summary.close
+      : null;
+  const hasAnalyst = rating != null || upside != null;
 
   return (
     <div className={`rounded-lg border p-4 ${styles.card}`}>
@@ -144,6 +170,27 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
         <span>L: {formatMoney(summary.low)}</span>
         <span>Vol: {formatVolume(summary.volume)}</span>
       </div>
+
+      {hasAnalyst && (
+        <div className="mt-3 flex items-center gap-2 border-t border-gray-200/70 pt-2.5 text-xs">
+          {rating && (
+            <span className={`font-medium px-1.5 py-0.5 rounded-full ${ratingStyle}`}>
+              {rating}
+            </span>
+          )}
+          {upside != null && (
+            <span className="text-gray-500">
+              <span className={`font-semibold tabular-nums ${upside >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {upside >= 0 ? '+' : ''}{(upside * 100).toFixed(1)}%
+              </span>
+              {' '}to target {formatMoney(summary.target_mean)}
+            </span>
+          )}
+          {summary.analyst_count != null && (
+            <span className="ml-auto text-[10px] text-gray-400">{summary.analyst_count} analysts</span>
+          )}
+        </div>
+      )}
 
       {summary.news.length > 0 && (
         <div className="mt-3">

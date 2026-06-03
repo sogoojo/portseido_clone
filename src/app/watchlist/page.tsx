@@ -1,14 +1,25 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { WatchlistRow, BuySignal } from '@/lib/types';
+import type { WatchlistRow, BuySignal, TrendState, ThesisState } from '@/lib/types';
 
 const SIGNAL_STYLE: Record<BuySignal, { text: string; chip: string; row: string }> = {
   strong_buy: { text: '🔥 Strong Buy', chip: 'bg-green-100 text-green-700', row: 'bg-green-50/60' },
   buy: { text: '✅ Buy', chip: 'bg-green-50 text-green-700', row: 'bg-green-50/30' },
   watch: { text: '👀 Watch', chip: 'bg-amber-100 text-amber-700', row: '' },
+  avoid: { text: '⛔ Avoid', chip: 'bg-red-100 text-red-700', row: 'bg-red-50/40' },
   hold: { text: '💤 Hold', chip: 'bg-gray-100 text-gray-500', row: '' },
   none: { text: 'Set target', chip: 'bg-gray-100 text-gray-400', row: '' },
+};
+
+const TREND_ICON: Record<TrendState, string> = {
+  uptrend: '↗', downtrend: '↘', neutral: '→', unknown: '·',
+};
+const THESIS_ICON: Record<ThesisState, { icon: string; cls: string; title: string }> = {
+  improving: { icon: 'est ↑', cls: 'text-green-600', title: 'Estimates being raised' },
+  stable: { icon: 'est →', cls: 'text-gray-400', title: 'Estimates stable' },
+  weakening: { icon: 'est ↓', cls: 'text-red-600', title: 'Estimates being cut' },
+  unknown: { icon: '', cls: 'text-gray-300', title: 'No estimate data' },
 };
 
 const money = (v: number | null, ccy = 'USD') =>
@@ -86,10 +97,11 @@ export default function WatchlistPage() {
       </form>
 
       <p className="text-xs text-gray-500 max-w-2xl">
-        Signal grades how far the price trades <b>below a dynamic fair entry</b> — the average of
-        (200-day MA − 5%) and (analyst target − 20%), recomputed daily so it never goes stale.
-        ≥15% below = 🔥 Strong Buy, 5–15% below = ✅ Buy, around it = 👀 Watch, above it = 💤 Hold.
-        <b>Anchor</b> is your manual price (used only if no dynamic inputs exist). 🔪 = falling knife (&gt;30% off 52w high).
+        Verdict starts from cheapness vs a <b>dynamic fair entry</b> (avg of 200-day MA − 5% and
+        analyst target − 20%), then adjusts for trend &amp; thesis: a <b>falling knife</b> (downtrend
+        + near 52-week low, marked 🔪) caps a buy to 👀 <b>Watch</b>, and if estimates are also being
+        cut it becomes ⛔ <b>Avoid</b>. Trend ↗/↘ is the 50/200-day MA stack; <b>est ↑/↓</b> is
+        whether analysts are raising or cutting next-year EPS.
       </p>
 
       {loading ? (
@@ -107,6 +119,7 @@ export default function WatchlistPage() {
                 <th className="px-2 text-right font-medium">Fair entry</th>
                 <th className="px-2 text-right font-medium">Anchor</th>
                 <th className="px-2 text-right font-medium">Distance</th>
+                <th className="px-2 text-center font-medium">Trend</th>
                 <th className="px-2 text-right font-medium">From 52w High</th>
                 <th className="px-2 text-right font-medium">Analyst</th>
                 <th className="px-2 text-left font-medium">Notes</th>
@@ -131,13 +144,21 @@ export default function WatchlistPage() {
                     <td className={`px-2 text-right tabular-nums font-medium ${r.distance == null ? 'text-gray-400' : r.distance >= 0 ? 'text-green-600' : 'text-gray-500'}`}>
                       {signedPct(r.distance)}
                     </td>
+                    <td className="px-2 text-center">
+                      <span className={r.trend === 'downtrend' ? 'text-red-500' : r.trend === 'uptrend' ? 'text-green-600' : 'text-gray-400'}
+                        title={`Trend: ${r.trend}`}>{TREND_ICON[r.trend]}</span>
+                      {r.knife && <span title="Falling knife: downtrend + near 52w low"> 🔪</span>}
+                    </td>
                     <td className="px-2 text-right tabular-nums text-gray-500">
-                      {signedPct(r.pct_from_high)} {r.knife && <span title="Falling knife: >30% off 52w high">🔪</span>}
+                      {signedPct(r.pct_from_high)}
                     </td>
                     <td className="px-2 text-right text-[11px] text-gray-500">
                       {r.recommendation_key ? r.recommendation_key.replace('_', ' ') : ''}
                       {r.analyst_upside != null && (
                         <span className={r.analyst_upside >= 0 ? 'text-green-600' : 'text-red-600'}> {signedPct(r.analyst_upside)}</span>
+                      )}
+                      {r.thesis !== 'unknown' && (
+                        <span className={`ml-1 ${THESIS_ICON[r.thesis].cls}`} title={THESIS_ICON[r.thesis].title}>{THESIS_ICON[r.thesis].icon}</span>
                       )}
                     </td>
                     <td className="px-2 text-[11px] text-gray-400 max-w-[180px] truncate">{r.notes}</td>

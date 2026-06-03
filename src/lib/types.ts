@@ -42,6 +42,8 @@ export interface PriceData {
   change_pct: number | null;
   currency: string;
   fifty_two_week_high?: number | null;
+  fifty_two_week_low?: number | null;
+  fifty_day_avg?: number | null;
   two_hundred_day_avg?: number | null;
   fetched_at: string;
 }
@@ -179,7 +181,9 @@ export interface WatchlistItem {
   added_at: string;
 }
 
-export type BuySignal = 'strong_buy' | 'buy' | 'watch' | 'hold' | 'none';
+export type BuySignal = 'strong_buy' | 'buy' | 'watch' | 'avoid' | 'hold' | 'none';
+export type TrendState = 'uptrend' | 'downtrend' | 'neutral' | 'unknown';
+export type ThesisState = 'improving' | 'stable' | 'weakening' | 'unknown';
 
 export interface WatchlistRow extends WatchlistItem {
   price: number | null;
@@ -188,10 +192,13 @@ export interface WatchlistRow extends WatchlistItem {
   effective_target: number | null; // dynamic_target, or manual target_entry as fallback
   target_basis: 'dynamic' | 'fixed' | 'none';
   distance: number | null;         // (effective_target - price) / price
-  signal: BuySignal;
+  signal: BuySignal;               // thesis-aware verdict
+  cheapness: BuySignal;            // raw cheap-vs-fair grade before knife/thesis
   fifty_two_week_high: number | null;
   pct_from_high: number | null;    // (price - 52wHigh) / 52wHigh
-  knife: boolean;                  // > 30% below 52w high
+  trend: TrendState;               // from 50/200-day MA stack
+  knife: boolean;                  // trend-based: downtrend + near 52w low
+  thesis: ThesisState;             // from next-year EPS revision momentum
   analyst_upside: number | null;   // (consensus target - price) / price, if covered
   recommendation_key: string | null;
   stale: boolean;

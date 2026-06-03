@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS price_cache (
   change_pct REAL,
   currency TEXT NOT NULL,
   fifty_two_week_high REAL,
+  fifty_two_week_low REAL,
+  fifty_day_avg REAL,
   two_hundred_day_avg REAL,
   fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (ticker, date)

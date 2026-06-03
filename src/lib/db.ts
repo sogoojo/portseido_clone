@@ -50,6 +50,8 @@ const migrations = [
   `ALTER TABLE daily_summaries ADD COLUMN earnings_trend TEXT`,
   // 52-week high + 200-day average cached for watchlist signals / dynamic targets
   `ALTER TABLE price_cache ADD COLUMN fifty_two_week_high REAL`,
+  `ALTER TABLE price_cache ADD COLUMN fifty_two_week_low REAL`,
+  `ALTER TABLE price_cache ADD COLUMN fifty_day_avg REAL`,
   `ALTER TABLE price_cache ADD COLUMN two_hundred_day_avg REAL`,
   // Watchlist buy-signal fields
   `ALTER TABLE watchlist ADD COLUMN target_entry REAL`,

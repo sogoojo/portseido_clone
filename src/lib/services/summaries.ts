@@ -137,10 +137,19 @@ export function getWatchlist(): WatchlistItem[] {
   return db.prepare('SELECT * FROM watchlist ORDER BY added_at DESC').all() as WatchlistItem[];
 }
 
-export function addToWatchlist(ticker: string, name?: string): WatchlistItem {
+export function addToWatchlist(
+  ticker: string,
+  name?: string,
+  opts?: { target_entry?: number | null; tier?: number | null; notes?: string | null }
+): WatchlistItem {
   db.prepare(
-    'INSERT OR IGNORE INTO watchlist (ticker, name) VALUES (?, ?)'
-  ).run(ticker, name ?? null);
+    `INSERT INTO watchlist (ticker, name, target_entry, tier, notes) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(ticker) DO UPDATE SET
+       name = COALESCE(excluded.name, watchlist.name),
+       target_entry = excluded.target_entry,
+       tier = excluded.tier,
+       notes = excluded.notes`
+  ).run(ticker, name ?? null, opts?.target_entry ?? null, opts?.tier ?? null, opts?.notes ?? null);
   return db.prepare('SELECT * FROM watchlist WHERE ticker = ?').get(ticker) as WatchlistItem;
 }
 

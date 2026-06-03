@@ -41,6 +41,7 @@ export interface PriceData {
   change: number | null;
   change_pct: number | null;
   currency: string;
+  fifty_two_week_high?: number | null;
   fetched_at: string;
 }
 
@@ -171,7 +172,50 @@ export interface DailySummary {
 export interface WatchlistItem {
   ticker: string;
   name: string | null;
+  target_entry: number | null;
+  tier: number | null;
+  notes: string | null;
   added_at: string;
+}
+
+export type BuySignal = 'strong_buy' | 'buy' | 'watch' | 'hold' | 'none';
+
+export interface WatchlistRow extends WatchlistItem {
+  price: number | null;
+  currency: string;
+  distance: number | null;         // (target_entry - price) / price
+  signal: BuySignal;
+  fifty_two_week_high: number | null;
+  pct_from_high: number | null;    // (price - 52wHigh) / 52wHigh
+  knife: boolean;                  // > 30% below 52w high
+  analyst_upside: number | null;   // (consensus target - price) / price, if covered
+  recommendation_key: string | null;
+  stale: boolean;
+}
+
+export interface TargetRow {
+  ticker: string;
+  tier: number | null;
+  target_pct: number;
+}
+
+export type RebalanceStatus = 'underweight' | 'on_target' | 'overweight' | 'untracked';
+
+export interface RebalanceRow {
+  ticker: string;
+  name: string | null;
+  tier: number | null;
+  value_eur: number;
+  current_pct: number;
+  target_pct: number | null;
+  gap: number | null;              // target_pct - current_pct (percentage points)
+  status: RebalanceStatus;
+  priority: string;                // High | Medium | Low | Full | Add | -
+}
+
+export interface RebalanceResult {
+  total_eur: number;
+  rows: RebalanceRow[];
 }
 
 // --- API Response ---

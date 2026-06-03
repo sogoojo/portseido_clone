@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { seedAccounts } from './seed';
+import { seedTargets } from './seed-targets';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'portseido-lite.db');
 const SCHEMA_PATH = path.join(process.cwd(), 'src', 'lib', 'schema.sql');
@@ -46,6 +47,12 @@ const migrations = [
   `ALTER TABLE daily_summaries ADD COLUMN rating_changes TEXT`,
   `ALTER TABLE daily_summaries ADD COLUMN recommendation_trend TEXT`,
   `ALTER TABLE daily_summaries ADD COLUMN earnings_trend TEXT`,
+  // 52-week high cached for watchlist signals
+  `ALTER TABLE price_cache ADD COLUMN fifty_two_week_high REAL`,
+  // Watchlist buy-signal fields
+  `ALTER TABLE watchlist ADD COLUMN target_entry REAL`,
+  `ALTER TABLE watchlist ADD COLUMN tier INTEGER`,
+  `ALTER TABLE watchlist ADD COLUMN notes TEXT`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch { /* column already exists */ }
@@ -53,5 +60,6 @@ for (const sql of migrations) {
 
 // Seed accounts on first connection
 seedAccounts(db);
+seedTargets(db);
 
 export default db;

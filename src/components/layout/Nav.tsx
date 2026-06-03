@@ -7,6 +7,8 @@ const tabs = [
   { name: 'Dashboard', href: '/' },
   { name: 'Performance', href: '/performance' },
   { name: 'Allocation', href: '/allocation' },
+  { name: 'Rebalance', href: '/rebalance' },
+  { name: 'Watchlist', href: '/watchlist' },
   { name: 'Transactions', href: '/transactions' },
   { name: 'Summaries', href: '/summaries' },
 ];

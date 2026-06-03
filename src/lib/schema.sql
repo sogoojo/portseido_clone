@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS price_cache (
   change REAL,
   change_pct REAL,
   currency TEXT NOT NULL,
+  fifty_two_week_high REAL,
   fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (ticker, date)
 );
@@ -101,5 +102,15 @@ CREATE INDEX IF NOT EXISTS idx_daily_summaries_date ON daily_summaries(date);
 CREATE TABLE IF NOT EXISTS watchlist (
   ticker TEXT PRIMARY KEY,
   name TEXT,
+  target_entry REAL,   -- desired buy price; drives the buy signal
+  tier INTEGER,        -- 1 stability / 2 growth / 3 speculative
+  notes TEXT,
   added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Per-ticker target portfolio weights (percent, e.g. 9 = 9%); drives rebalancing
+CREATE TABLE IF NOT EXISTS targets (
+  ticker TEXT PRIMARY KEY,
+  tier INTEGER,            -- 1 stability / 2 growth / 3 speculative
+  target_pct REAL NOT NULL -- percent of total portfolio value
 );

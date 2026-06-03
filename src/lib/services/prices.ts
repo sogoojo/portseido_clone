@@ -41,18 +41,20 @@ function isCacheStale(fetchedAt: string): boolean {
 function upsertPriceCache(ticker: string, date: string, data: {
   open?: number | null; high?: number | null; low?: number | null;
   close: number; previous_close?: number | null; change?: number | null; change_pct?: number | null;
-  currency: string;
+  currency: string; fifty_two_week_high?: number | null;
 }) {
   db.prepare(
-    `INSERT INTO price_cache (ticker, date, open, high, low, close, previous_close, change, change_pct, currency, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO price_cache (ticker, date, open, high, low, close, previous_close, change, change_pct, currency, fifty_two_week_high, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(ticker, date) DO UPDATE SET
        open = excluded.open, high = excluded.high, low = excluded.low,
        close = excluded.close, previous_close = excluded.previous_close,
        change = excluded.change, change_pct = excluded.change_pct,
-       currency = excluded.currency, fetched_at = datetime('now')`
+       currency = excluded.currency, fifty_two_week_high = excluded.fifty_two_week_high,
+       fetched_at = datetime('now')`
   ).run(ticker, date, data.open ?? null, data.high ?? null, data.low ?? null, data.close,
-    data.previous_close ?? null, data.change ?? null, data.change_pct ?? null, data.currency);
+    data.previous_close ?? null, data.change ?? null, data.change_pct ?? null, data.currency,
+    data.fifty_two_week_high ?? null);
 }
 
 // --- Metadata ---
@@ -134,6 +136,7 @@ export interface CurrentPriceResult {
   change: number | null;
   changePct: number | null;
   currency: string;
+  fiftyTwoWeekHigh: number | null;
   stale: boolean;
   warning?: string;
 }
@@ -144,7 +147,7 @@ export async function getCurrentPrice(ticker: string): Promise<CurrentPriceResul
   // Check cache first
   const cached = getCachedPrice(ticker, today);
   if (cached && !isCacheStale(cached.fetched_at)) {
-    return { ticker, price: cached.close, previousClose: cached.previous_close, change: cached.change, changePct: cached.change_pct, currency: cached.currency, stale: false };
+    return { ticker, price: cached.close, previousClose: cached.previous_close, change: cached.change, changePct: cached.change_pct, currency: cached.currency, fiftyTwoWeekHigh: cached.fifty_two_week_high ?? null, stale: false };
   }
 
   // NGX ticker
@@ -153,12 +156,12 @@ export async function getCurrentPrice(ticker: string): Promise<CurrentPriceResul
     const ngxPrice = await fetchNgxCurrentPrice(ticker);
     if (ngxPrice) {
       upsertPriceCache(ticker, today, { close: ngxPrice.close, currency: 'NGN' });
-      return { ticker, price: ngxPrice.close, previousClose: null, change: null, changePct: null, currency: 'NGN', stale: false };
+      return { ticker, price: ngxPrice.close, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency: 'NGN', stale: false };
     }
     if (cached) {
-      return { ticker, price: cached.close, previousClose: null, change: null, changePct: null, currency: cached.currency, stale: true, warning: 'Using stale cached price' };
+      return { ticker, price: cached.close, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency: cached.currency, stale: true, warning: 'Using stale cached price' };
     }
-    return { ticker, price: null, previousClose: null, change: null, changePct: null, currency: 'NGN', stale: false, warning: 'No price available for NGX ticker' };
+    return { ticker, price: null, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency: 'NGN', stale: false, warning: 'No price available for NGX ticker' };
   }
 
   // Yahoo Finance
@@ -172,6 +175,8 @@ export async function getCurrentPrice(ticker: string): Promise<CurrentPriceResul
     const change = quote.regularMarketChange ?? null;
     const changePct = quote.regularMarketChangePercent ?? null;
 
+    const fiftyTwoWeekHigh = quote.fiftyTwoWeekHigh ?? null;
+
     if (price != null) {
       upsertPriceCache(ticker, today, {
         open: quote.regularMarketOpen ?? null,
@@ -182,21 +187,22 @@ export async function getCurrentPrice(ticker: string): Promise<CurrentPriceResul
         change,
         change_pct: changePct,
         currency,
+        fifty_two_week_high: fiftyTwoWeekHigh,
       });
-      return { ticker, price, previousClose, change, changePct, currency, stale: false };
+      return { ticker, price, previousClose, change, changePct, currency, fiftyTwoWeekHigh, stale: false };
     }
 
     // Fallback to stale cache
     if (cached) {
-      return { ticker, price: cached.close, previousClose: null, change: null, changePct: null, currency: cached.currency, stale: true, warning: 'Yahoo returned no price, using stale cache' };
+      return { ticker, price: cached.close, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency: cached.currency, stale: true, warning: 'Yahoo returned no price, using stale cache' };
     }
-    return { ticker, price: null, previousClose: null, change: null, changePct: null, currency, stale: false, warning: 'No price data available' };
+    return { ticker, price: null, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency, stale: false, warning: 'No price data available' };
   } catch (err) {
     console.error(`[PriceService] Error fetching ${ticker}:`, err);
     if (cached) {
-      return { ticker, price: cached.close, previousClose: null, change: null, changePct: null, currency: cached.currency, stale: true, warning: 'Fetch failed, using stale cache' };
+      return { ticker, price: cached.close, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency: cached.currency, stale: true, warning: 'Fetch failed, using stale cache' };
     }
-    return { ticker, price: null, previousClose: null, change: null, changePct: null, currency: 'USD', stale: false, warning: `Fetch error: ${(err as Error).message}` };
+    return { ticker, price: null, previousClose: null, change: null, changePct: null, fiftyTwoWeekHigh: null, currency: 'USD', stale: false, warning: `Fetch error: ${(err as Error).message}` };
   }
 }
 

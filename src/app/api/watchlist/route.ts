@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getWatchlist, addToWatchlist, removeFromWatchlist } from '@/lib/services/summaries';
+import { addToWatchlist, removeFromWatchlist } from '@/lib/services/summaries';
+import { getWatchlistRows } from '@/lib/services/watchlist';
 
 export async function GET() {
   try {
-    const items = getWatchlist();
-    return NextResponse.json({ data: items });
+    const rows = await getWatchlistRows();
+    return NextResponse.json({ data: rows });
   } catch (err) {
     console.error('[API/watchlist] Error:', err);
     return NextResponse.json(
@@ -17,7 +18,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ticker, name } = body;
+    const { ticker, name, target_entry, tier, notes } = body;
 
     if (!ticker || typeof ticker !== 'string') {
       return NextResponse.json(
@@ -26,7 +27,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const item = addToWatchlist(ticker.toUpperCase(), name);
+    const item = addToWatchlist(ticker.toUpperCase(), name, {
+      target_entry: typeof target_entry === 'number' ? target_entry : null,
+      tier: typeof tier === 'number' ? tier : null,
+      notes: typeof notes === 'string' ? notes : null,
+    });
     return NextResponse.json({ data: item });
   } catch (err) {
     console.error('[API/watchlist] Error:', err);

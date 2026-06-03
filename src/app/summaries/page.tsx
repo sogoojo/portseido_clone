@@ -93,11 +93,12 @@ const SENTIMENT_STYLES: Record<Sentiment, { card: string; label: string; text: s
   },
 };
 
-// Sort weight: bearish first, bullish last; uncovered sit in the middle.
+// Sort weight: strongest/best outlook first, worst last; uncovered sink to the bottom.
 function sentimentRank(s: Sentiment): number {
-  if (s === 'negative') return 0;
-  if (s === 'positive') return 3;
-  return s === 'neutral' ? 2 : 1; // 'none' just before neutral
+  if (s === 'positive') return 0;
+  if (s === 'neutral') return 1;
+  if (s === 'negative') return 2;
+  return 3; // 'none' — no analyst outlook, goes last
 }
 
 function formatGrowth(value: number | null): string {
@@ -300,7 +301,7 @@ export default function SummariesPage() {
       .map(s => ({ summary: s, sentiment: forwardSentiment(s), score: forwardScore(s) }))
       .sort((a, b) => {
         const r = sentimentRank(a.sentiment) - sentimentRank(b.sentiment);
-        return r !== 0 ? r : a.score - b.score;
+        return r !== 0 ? r : b.score - a.score; // within a tier, highest score first
       });
   }, [summaries]);
 
@@ -324,10 +325,10 @@ export default function SummariesPage() {
           )}
         </div>
         <div className="flex items-center gap-2 text-[10px]">
-          <span className="text-gray-400">Forward analyst outlook (~12mo):</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Bearish</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Neutral</span>
+          <span className="text-gray-400">Forward analyst outlook (~12mo) — best first:</span>
           <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Bullish</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Neutral</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Bearish</span>
         </div>
       </div>
 

@@ -39,17 +39,20 @@ function forwardScore(s: DailySummary): number {
     score += clamp(3 - s.recommendation_mean, -2, 2);
   }
 
-  // 2. 12-month price-target upside vs current price
+  // 2. 12-month price-target upside vs current price.
+  // Wide cap (±4) so genuinely larger upside ranks above smaller — a 33% upside
+  // should beat 22%, not flat-line at the same value.
   if (s.target_mean != null && s.close) {
     const upside = (s.target_mean - s.close) / s.close;
-    score += clamp(upside * 10, -2, 2);
+    score += clamp(upside * 10, -4, 4);
   }
 
-  // 3. Estimate-revision momentum (next year): analysts raising vs cutting
+  // 3. Estimate-revision momentum (next year): analysts raising vs cutting.
+  // Cap ±3 so strong conviction (net +40) outweighs mild (net +9).
   const ny = s.earnings_trend.find(t => t.period === '+1y');
   if (ny && (ny.eps_up_30d != null || ny.eps_down_30d != null)) {
     const net = (ny.eps_up_30d ?? 0) - (ny.eps_down_30d ?? 0);
-    score += clamp(net / 5, -1.5, 1.5);
+    score += clamp(net / 8, -3, 3);
   }
 
   // 4. Rating-mix trajectory: now vs ~3 months ago

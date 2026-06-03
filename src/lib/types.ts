@@ -42,6 +42,7 @@ export interface PriceData {
   change_pct: number | null;
   currency: string;
   fifty_two_week_high?: number | null;
+  two_hundred_day_avg?: number | null;
   fetched_at: string;
 }
 
@@ -183,7 +184,10 @@ export type BuySignal = 'strong_buy' | 'buy' | 'watch' | 'hold' | 'none';
 export interface WatchlistRow extends WatchlistItem {
   price: number | null;
   currency: string;
-  distance: number | null;         // (target_entry - price) / price
+  dynamic_target: number | null;   // blended fair entry: avg(200DMA-5%, analystTarget-20%)
+  effective_target: number | null; // dynamic_target, or manual target_entry as fallback
+  target_basis: 'dynamic' | 'fixed' | 'none';
+  distance: number | null;         // (effective_target - price) / price
   signal: BuySignal;
   fifty_two_week_high: number | null;
   pct_from_high: number | null;    // (price - 52wHigh) / 52wHigh

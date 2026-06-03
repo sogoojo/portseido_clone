@@ -86,8 +86,10 @@ export default function WatchlistPage() {
       </form>
 
       <p className="text-xs text-gray-500 max-w-2xl">
-        Signal is driven by how far the live price sits below your <b>target entry</b>:
-        at/below = 🔥 Strong Buy, within 5% = ✅ Buy, within 15% = 👀 Watch. 🔪 = falling knife (&gt;30% off 52w high).
+        Signal grades how far the price trades <b>below a dynamic fair entry</b> — the average of
+        (200-day MA − 5%) and (analyst target − 20%), recomputed daily so it never goes stale.
+        ≥15% below = 🔥 Strong Buy, 5–15% below = ✅ Buy, around it = 👀 Watch, above it = 💤 Hold.
+        <b>Anchor</b> is your manual price (used only if no dynamic inputs exist). 🔪 = falling knife (&gt;30% off 52w high).
       </p>
 
       {loading ? (
@@ -102,7 +104,8 @@ export default function WatchlistPage() {
                 <th className="py-2 pl-3 pr-2 text-left font-medium">Signal</th>
                 <th className="px-2 text-left font-medium">Ticker</th>
                 <th className="px-2 text-right font-medium">Price</th>
-                <th className="px-2 text-right font-medium">Target</th>
+                <th className="px-2 text-right font-medium">Fair entry</th>
+                <th className="px-2 text-right font-medium">Anchor</th>
                 <th className="px-2 text-right font-medium">Distance</th>
                 <th className="px-2 text-right font-medium">From 52w High</th>
                 <th className="px-2 text-right font-medium">Analyst</th>
@@ -120,7 +123,11 @@ export default function WatchlistPage() {
                     </td>
                     <td className="px-2 font-medium text-gray-900">{r.ticker}</td>
                     <td className="px-2 text-right tabular-nums text-gray-700">{money(r.price, r.currency)}</td>
-                    <td className="px-2 text-right tabular-nums text-gray-500">{money(r.target_entry, r.currency)}</td>
+                    <td className="px-2 text-right tabular-nums text-gray-700">
+                      {money(r.effective_target, r.currency)}
+                      {r.target_basis === 'fixed' && <span className="ml-1 text-[9px] text-amber-500" title="No dynamic inputs — using your manual anchor">fix</span>}
+                    </td>
+                    <td className="px-2 text-right tabular-nums text-gray-400">{money(r.target_entry, r.currency)}</td>
                     <td className={`px-2 text-right tabular-nums font-medium ${r.distance == null ? 'text-gray-400' : r.distance >= 0 ? 'text-green-600' : 'text-gray-500'}`}>
                       {signedPct(r.distance)}
                     </td>

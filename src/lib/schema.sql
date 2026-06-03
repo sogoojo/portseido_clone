@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
   earnings_surprise_pct REAL,     -- most recent quarter EPS surprise (fraction)
   insider_net_shares REAL,        -- insider buy shares - sell shares (period)
   rating_changes TEXT,            -- JSON: recent analyst upgrade/downgrade history
+  recommendation_trend TEXT,      -- JSON: buy/hold/sell mix over recent months (0m,-1m,-2m,-3m)
+  earnings_trend TEXT,            -- JSON: forward EPS growth + revision momentum per horizon
   fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (ticker, date)
 );

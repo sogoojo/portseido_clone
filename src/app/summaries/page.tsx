@@ -4,58 +4,67 @@ import { useState, useEffect, useMemo } from 'react';
 import type { DailySummary, NewsArticle } from '@/lib/types';
 import SentimentTrends from '@/components/summaries/SentimentTrends';
 
-const NEGATIVE_WORDS = new Set([
-  'decline', 'declined', 'drop', 'drops', 'dropped', 'fall', 'falls', 'fell',
-  'sell', 'selloff', 'selling', 'downgrade', 'downgraded', 'loss', 'losses',
-  'crash', 'crashed', 'plunge', 'plunged', 'plunges', 'slump', 'slumped',
-  'weak', 'weaken', 'cut', 'cuts', 'miss', 'missed', 'misses', 'concern',
-  'concerns', 'risk', 'risks', 'fear', 'fears', 'tumble', 'tumbled', 'slide',
-  'slides', 'slid', 'warning', 'warn', 'warns', 'layoff', 'layoffs',
-  'bearish', 'underperform', 'overvalued', 'negative', 'pressure', 'retreat',
-  'retreated', 'sinks', 'sank', 'worst', 'trouble', 'crisis', 'lawsuit',
-  'fraud', 'investigation', 'probe', 'fine', 'fined', 'penalty',
-]);
+type Sentiment = 'negative' | 'neutral' | 'positive' | 'none';
 
-const POSITIVE_WORDS = new Set([
-  'surge', 'surged', 'surges', 'rally', 'rallied', 'rallies', 'gain', 'gains',
-  'gained', 'rise', 'rises', 'rose', 'upgrade', 'upgraded', 'beat', 'beats',
-  'strong', 'stronger', 'growth', 'boost', 'boosted', 'soar', 'soared',
-  'soars', 'jump', 'jumped', 'jumps', 'record', 'bullish', 'outperform',
-  'buy', 'breakout', 'momentum', 'optimism', 'positive', 'innovation',
-  'partnership', 'expansion', 'launch', 'launched', 'profit', 'profitable',
-  'revenue', 'dividend', 'winner', 'best', 'upside', 'opportunity',
-]);
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
 
-type Sentiment = 'negative' | 'neutral' | 'positive';
+// Does this ticker have any forward analyst coverage? (crypto/some ETFs don't)
+function hasForwardCoverage(s: DailySummary): boolean {
+  return (
+    s.recommendation_mean != null ||
+    s.target_mean != null ||
+    s.earnings_trend.length > 0
+  );
+}
 
-function scoreSentiment(summary: DailySummary): number {
+// Net bullishness of an analyst rating mix, weighted and normalised to [-1, 1].
+function netBullish(r: {
+  strongBuy: number; buy: number; hold: number; sell: number; strongSell: number;
+}): number {
+  const total = r.strongBuy + r.buy + r.hold + r.sell + r.strongSell;
+  if (!total) return 0;
+  return (r.strongBuy * 2 + r.buy - r.sell - r.strongSell * 2) / (total * 2);
+}
+
+// Forward-looking sentiment: analyst consensus + 12mo target upside + estimate-
+// revision momentum + how the rating mix has shifted over the last ~3 months.
+// Deliberately ignores the single-day price move.
+function forwardScore(s: DailySummary): number {
   let score = 0;
 
-  const pct = summary.change_pct ?? 0;
-  if (pct <= -3) score -= 2;
-  else if (pct <= -1) score -= 1;
-  else if (pct >= 3) score += 2;
-  else if (pct >= 1) score += 1;
+  // 1. Consensus rating (1=buy .. 5=sell): bullish below 3
+  if (s.recommendation_mean != null) {
+    score += clamp(3 - s.recommendation_mean, -2, 2);
+  }
 
-  for (const article of summary.news) {
-    const words = article.title.toLowerCase().split(/[^a-z]+/);
-    for (const w of words) {
-      if (NEGATIVE_WORDS.has(w)) score -= 1;
-      if (POSITIVE_WORDS.has(w)) score += 1;
-    }
-    if (article.snippet) {
-      const snippetWords = article.snippet.toLowerCase().split(/[^a-z]+/);
-      for (const w of snippetWords) {
-        if (NEGATIVE_WORDS.has(w)) score -= 0.5;
-        if (POSITIVE_WORDS.has(w)) score += 0.5;
-      }
-    }
+  // 2. 12-month price-target upside vs current price
+  if (s.target_mean != null && s.close) {
+    const upside = (s.target_mean - s.close) / s.close;
+    score += clamp(upside * 10, -2, 2);
+  }
+
+  // 3. Estimate-revision momentum (next year): analysts raising vs cutting
+  const ny = s.earnings_trend.find(t => t.period === '+1y');
+  if (ny && (ny.eps_up_30d != null || ny.eps_down_30d != null)) {
+    const net = (ny.eps_up_30d ?? 0) - (ny.eps_down_30d ?? 0);
+    score += clamp(net / 5, -1.5, 1.5);
+  }
+
+  // 4. Rating-mix trajectory: now vs ~3 months ago
+  const now = s.recommendation_trend.find(t => t.period === '0m');
+  const ago = s.recommendation_trend.find(t => t.period === '-3m');
+  if (now && ago) {
+    score += clamp((netBullish(now) - netBullish(ago)) * 5, -1, 1);
   }
 
   return score;
 }
 
-function getSentiment(score: number): Sentiment {
+function forwardSentiment(s: DailySummary): Sentiment {
+  if (!hasForwardCoverage(s)) return 'none';
+  const score = forwardScore(s);
   if (score <= -2) return 'negative';
   if (score >= 2) return 'positive';
   return 'neutral';
@@ -77,7 +86,25 @@ const SENTIMENT_STYLES: Record<Sentiment, { card: string; label: string; text: s
     label: 'bg-green-100 text-green-700',
     text: 'Bullish',
   },
+  none: {
+    card: 'border-gray-200 bg-white',
+    label: 'bg-gray-100 text-gray-500',
+    text: 'No coverage',
+  },
 };
+
+// Sort weight: bearish first, bullish last; uncovered sit in the middle.
+function sentimentRank(s: Sentiment): number {
+  if (s === 'negative') return 0;
+  if (s === 'positive') return 3;
+  return s === 'neutral' ? 2 : 1; // 'none' just before neutral
+}
+
+function formatGrowth(value: number | null): string {
+  if (value == null) return '–';
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${(value * 100).toFixed(1)}%`;
+}
 
 function formatMoney(value: number | null): string {
   if (value == null) return '-';
@@ -145,6 +172,14 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
       : null;
   const hasAnalyst = rating != null || upside != null;
 
+  // Forward earnings outlook: ~3mo (next quarter) and ~12mo (next year)
+  const nextQ = summary.earnings_trend.find(t => t.period === '+1q');
+  const nextY = summary.earnings_trend.find(t => t.period === '+1y');
+  const revNet = nextY ? (nextY.eps_up_30d ?? 0) - (nextY.eps_down_30d ?? 0) : 0;
+  const hasOutlook = nextQ?.growth != null || nextY?.growth != null || revNet !== 0;
+  const growthColor = (g: number | null) =>
+    g == null ? 'text-gray-400' : g >= 0 ? 'text-green-600' : 'text-red-600';
+
   return (
     <div className={`rounded-lg border p-4 ${styles.card}`}>
       <div className="flex items-start justify-between">
@@ -188,6 +223,26 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
           )}
           {summary.analyst_count != null && (
             <span className="ml-auto text-[10px] text-gray-400">{summary.analyst_count} analysts</span>
+          )}
+        </div>
+      )}
+
+      {hasOutlook && (
+        <div className="mt-2 flex items-center gap-3 text-[11px] text-gray-500">
+          <span className="text-gray-400">Est. growth</span>
+          {nextQ?.growth != null && (
+            <span>3mo <b className={`tabular-nums ${growthColor(nextQ.growth)}`}>{formatGrowth(nextQ.growth)}</b></span>
+          )}
+          {nextY?.growth != null && (
+            <span>12mo <b className={`tabular-nums ${growthColor(nextY.growth)}`}>{formatGrowth(nextY.growth)}</b></span>
+          )}
+          {revNet !== 0 && (
+            <span
+              className={`ml-auto font-medium ${revNet > 0 ? 'text-green-600' : 'text-red-600'}`}
+              title={`${nextY?.eps_up_30d ?? 0} analysts raised, ${nextY?.eps_down_30d ?? 0} cut estimates (30d)`}
+            >
+              {revNet > 0 ? '↑ est. rising' : '↓ est. falling'}
+            </span>
           )}
         </div>
       )}
@@ -242,8 +297,11 @@ export default function SummariesPage() {
 
   const scored = useMemo(() => {
     return summaries
-      .map(s => ({ summary: s, score: scoreSentiment(s) }))
-      .sort((a, b) => a.score - b.score);
+      .map(s => ({ summary: s, sentiment: forwardSentiment(s), score: forwardScore(s) }))
+      .sort((a, b) => {
+        const r = sentimentRank(a.sentiment) - sentimentRank(b.sentiment);
+        return r !== 0 ? r : a.score - b.score;
+      });
   }, [summaries]);
 
   const lastFetched = useMemo(() => {
@@ -265,10 +323,11 @@ export default function SummariesPage() {
             </span>
           )}
         </div>
-        <div className="flex gap-2 text-[10px]">
-          <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Bearish first</span>
+        <div className="flex items-center gap-2 text-[10px]">
+          <span className="text-gray-400">Forward analyst outlook (~12mo):</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Bearish</span>
           <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Neutral</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Bullish last</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Bullish</span>
         </div>
       </div>
 
@@ -308,11 +367,11 @@ export default function SummariesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {scored.map(({ summary, score }) => (
+          {scored.map(({ summary, sentiment }) => (
             <SummaryCard
               key={`${summary.ticker}-${summary.date}`}
               summary={summary}
-              sentiment={getSentiment(score)}
+              sentiment={sentiment}
             />
           ))}
         </div>

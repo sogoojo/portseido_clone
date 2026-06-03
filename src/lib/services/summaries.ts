@@ -1,6 +1,9 @@
 import db from '@/lib/db';
 import YahooFinance from 'yahoo-finance2';
-import type { DailySummary, WatchlistItem, NewsArticle, RatingChange } from '@/lib/types';
+import type {
+  DailySummary, WatchlistItem, NewsArticle, RatingChange,
+  RecTrendPoint, EarningsTrendPoint,
+} from '@/lib/types';
 
 const yahooFinance = new YahooFinance();
 
@@ -32,6 +35,8 @@ interface SummaryRow {
   earnings_surprise_pct: number | null;
   insider_net_shares: number | null;
   rating_changes: string | null;
+  recommendation_trend: string | null;
+  earnings_trend: string | null;
   fetched_at: string;
 }
 
@@ -44,7 +49,15 @@ function rowToSummary(row: SummaryRow): DailySummary {
   if (row.rating_changes) {
     try { rating_changes = JSON.parse(row.rating_changes); } catch { /* malformed JSON */ }
   }
-  return { ...row, news, rating_changes };
+  let recommendation_trend: RecTrendPoint[] = [];
+  if (row.recommendation_trend) {
+    try { recommendation_trend = JSON.parse(row.recommendation_trend); } catch { /* malformed JSON */ }
+  }
+  let earnings_trend: EarningsTrendPoint[] = [];
+  if (row.earnings_trend) {
+    try { earnings_trend = JSON.parse(row.earnings_trend); } catch { /* malformed JSON */ }
+  }
+  return { ...row, news, rating_changes, recommendation_trend, earnings_trend };
 }
 
 export function getSummaryForDate(ticker: string, date: string): DailySummary | null {
@@ -211,6 +224,8 @@ interface Signals {
   earnings_surprise_pct: number | null;
   insider_net_shares: number | null;
   rating_changes: RatingChange[];
+  recommendation_trend: RecTrendPoint[];
+  earnings_trend: EarningsTrendPoint[];
 }
 
 const EMPTY_SIGNALS: Signals = {
@@ -219,6 +234,7 @@ const EMPTY_SIGNALS: Signals = {
   forward_pe: null, peg_ratio: null, beta: null, short_ratio: null,
   fifty_two_week_change: null, earnings_surprise_pct: null,
   insider_net_shares: null, rating_changes: [],
+  recommendation_trend: [], earnings_trend: [],
 };
 
 function toISODate(v: unknown): string {
@@ -233,6 +249,7 @@ async function fetchSignals(ticker: string): Promise<Signals> {
       modules: [
         'financialData', 'defaultKeyStatistics', 'earningsHistory',
         'upgradeDowngradeHistory', 'netSharePurchaseActivity',
+        'recommendationTrend', 'earningsTrend',
       ],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }) as any;
@@ -254,6 +271,30 @@ async function fetchSignals(ticker: string): Promise<Signals> {
         action: h.action ?? '',
       }));
 
+    const recommendation_trend: RecTrendPoint[] = (s.recommendationTrend?.trend ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((r: any) => ({
+        period: r.period ?? '',
+        strongBuy: r.strongBuy ?? 0,
+        buy: r.buy ?? 0,
+        hold: r.hold ?? 0,
+        sell: r.sell ?? 0,
+        strongSell: r.strongSell ?? 0,
+      }));
+
+    const earnings_trend: EarningsTrendPoint[] = (s.earningsTrend?.trend ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((t: any) => ({
+        period: t.period ?? '',
+        growth: t.growth ?? null,
+        eps_up_30d: t.epsRevisions?.upLast30days ?? null,
+        eps_down_30d: t.epsRevisions?.downLast30days ?? null,
+      }))
+      // keep only horizons we use; drop empty rows
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((t: EarningsTrendPoint) =>
+        t.growth != null || t.eps_up_30d != null || t.eps_down_30d != null);
+
     return {
       recommendation_key: fd.recommendationKey ?? null,
       recommendation_mean: fd.recommendationMean ?? null,
@@ -272,6 +313,8 @@ async function fetchSignals(ticker: string): Promise<Signals> {
           ? ns.buyInfoShares - ns.sellInfoShares
           : null,
       rating_changes,
+      recommendation_trend,
+      earnings_trend,
     };
   } catch {
     return EMPTY_SIGNALS;
@@ -285,9 +328,9 @@ const upsertSummary = db.prepare(`
     recommendation_key, recommendation_mean, analyst_count,
     target_mean, target_high, target_low, forward_pe, peg_ratio, beta,
     short_ratio, fifty_two_week_change, earnings_surprise_pct,
-    insider_net_shares, rating_changes, fetched_at
+    insider_net_shares, rating_changes, recommendation_trend, earnings_trend, fetched_at
   )
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   ON CONFLICT(ticker, date) DO UPDATE SET
     open = excluded.open, high = excluded.high, low = excluded.low,
     close = excluded.close, previous_close = excluded.previous_close,
@@ -305,6 +348,8 @@ const upsertSummary = db.prepare(`
     earnings_surprise_pct = excluded.earnings_surprise_pct,
     insider_net_shares = excluded.insider_net_shares,
     rating_changes = excluded.rating_changes,
+    recommendation_trend = excluded.recommendation_trend,
+    earnings_trend = excluded.earnings_trend,
     fetched_at = datetime('now')
 `);
 
@@ -353,6 +398,8 @@ async function processTicker(ticker: string, date: string): Promise<boolean> {
       signals.earnings_surprise_pct,
       signals.insider_net_shares,
       JSON.stringify(signals.rating_changes),
+      JSON.stringify(signals.recommendation_trend),
+      JSON.stringify(signals.earnings_trend),
     );
     return true;
   } catch {

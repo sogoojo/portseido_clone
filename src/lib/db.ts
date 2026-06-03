@@ -44,6 +44,8 @@ const migrations = [
   `ALTER TABLE daily_summaries ADD COLUMN earnings_surprise_pct REAL`,
   `ALTER TABLE daily_summaries ADD COLUMN insider_net_shares REAL`,
   `ALTER TABLE daily_summaries ADD COLUMN rating_changes TEXT`,
+  `ALTER TABLE daily_summaries ADD COLUMN recommendation_trend TEXT`,
+  `ALTER TABLE daily_summaries ADD COLUMN earnings_trend TEXT`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch { /* column already exists */ }

@@ -118,6 +118,22 @@ export interface RatingChange {
   action: string;        // up | down | init | main | reit
 }
 
+export interface RecTrendPoint {
+  period: string;        // 0m | -1m | -2m | -3m
+  strongBuy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strongSell: number;
+}
+
+export interface EarningsTrendPoint {
+  period: string;        // 0q | +1q | 0y | +1y | +5y
+  growth: number | null; // estimated EPS growth (fraction)
+  eps_up_30d: number | null;   // analysts revising EPS up, last 30d
+  eps_down_30d: number | null; // analysts revising EPS down, last 30d
+}
+
 export interface DailySummary {
   ticker: string;
   date: string;
@@ -147,6 +163,8 @@ export interface DailySummary {
   earnings_surprise_pct: number | null;
   insider_net_shares: number | null;
   rating_changes: RatingChange[];
+  recommendation_trend: RecTrendPoint[];
+  earnings_trend: EarningsTrendPoint[];
   fetched_at: string;
 }
 

@@ -368,6 +368,14 @@ async function processTicker(ticker: string, date: string, backfill = false): Pr
   try {
     const quote = await yahooFinance.quote(ticker);
 
+    // Freshness guard (live path only): if the quote's last trade isn't from the
+    // target day, the market didn't trade then (weekend/holiday) or the run is
+    // mistimed — skip rather than write a stale snapshot under today's date. Crypto
+    // trades daily so it still passes on weekends; backfill uses historical bars.
+    if (!backfill && quote.regularMarketTime && toISODate(quote.regularMarketTime) !== date) {
+      return false;
+    }
+
     // Default to the live quote's OHLC. For a past-date backfill, override the
     // price fields with that day's actual historical bar — currency, marketCap and
     // analyst signals stay current, which is acceptable for a recent backfill since

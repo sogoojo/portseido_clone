@@ -362,13 +362,45 @@ const upsertSummary = db.prepare(`
     fetched_at = datetime('now')
 `);
 
-async function processTicker(ticker: string, date: string): Promise<boolean> {
+async function processTicker(ticker: string, date: string, backfill = false): Promise<boolean> {
   if (ticker.startsWith('NSENG:')) return false;
 
   try {
     const quote = await yahooFinance.quote(ticker);
-    const price = quote.regularMarketPrice;
-    if (price == null) return false;
+
+    // Default to the live quote's OHLC. For a past-date backfill, override the
+    // price fields with that day's actual historical bar — currency, marketCap and
+    // analyst signals stay current, which is acceptable for a recent backfill since
+    // only the OHLC snapshot is genuinely date-specific.
+    let open = quote.regularMarketOpen ?? null;
+    let high = quote.regularMarketDayHigh ?? null;
+    let low = quote.regularMarketDayLow ?? null;
+    let close = quote.regularMarketPrice ?? null;
+    let previousClose = quote.regularMarketPreviousClose ?? null;
+    let change = quote.regularMarketChange ?? null;
+    let changePct = quote.regularMarketChangePercent ?? null;
+    let volume = quote.regularMarketVolume ?? null;
+
+    if (backfill) {
+      const target = new Date(`${date}T00:00:00Z`);
+      const period1 = new Date(target.getTime() - 7 * 86400000); // look back for prev close
+      const period2 = new Date(target.getTime() + 86400000);
+      const bars = await yahooFinance.historical(ticker, { period1, period2 });
+      const idx = bars.findIndex(b => b.date.toISOString().split('T')[0] === date);
+      if (idx === -1) return false;
+      const bar = bars[idx];
+      const prev = idx > 0 ? bars[idx - 1] : null;
+      open = bar.open ?? null;
+      high = bar.high ?? null;
+      low = bar.low ?? null;
+      close = bar.close ?? null;
+      previousClose = prev?.close ?? null;
+      change = previousClose != null && close != null ? close - previousClose : null;
+      changePct = previousClose && close != null ? ((close - previousClose) / previousClose) * 100 : null;
+      volume = bar.volume ?? null;
+    }
+
+    if (close == null) return false;
 
     const meta = db.prepare('SELECT name FROM ticker_metadata WHERE ticker = ?')
       .get(ticker) as { name: string } | undefined;
@@ -382,14 +414,14 @@ async function processTicker(ticker: string, date: string): Promise<boolean> {
 
     upsertSummary.run(
       ticker, date,
-      quote.regularMarketOpen ?? null,
-      quote.regularMarketDayHigh ?? null,
-      quote.regularMarketDayLow ?? null,
-      price,
-      quote.regularMarketPreviousClose ?? null,
-      quote.regularMarketChange ?? null,
-      quote.regularMarketChangePercent ?? null,
-      quote.regularMarketVolume ?? null,
+      open,
+      high,
+      low,
+      close,
+      previousClose,
+      change,
+      changePct,
+      volume,
       quote.marketCap ?? null,
       quote.currency || 'USD',
       JSON.stringify(allNews),
@@ -416,14 +448,20 @@ async function processTicker(ticker: string, date: string): Promise<boolean> {
   }
 }
 
-export async function runDailySummaries(): Promise<{ date: string; success: number; total: number }> {
-  const date = new Date().toISOString().split('T')[0];
+export async function runDailySummaries(
+  targetDate?: string
+): Promise<{ date: string; success: number; total: number }> {
+  const today = new Date().toISOString().split('T')[0];
+  const date = targetDate ?? today;
+  // A past target date means a backfill: pull each ticker's actual historical bar
+  // for that day rather than the live quote.
+  const backfill = date < today;
   const tickers = getTickersToSummarize();
   if (tickers.length === 0) return { date, success: 0, total: 0 };
 
   let success = 0;
   for (const ticker of tickers) {
-    const ok = await processTicker(ticker, date);
+    const ok = await processTicker(ticker, date, backfill);
     if (ok) success++;
     await new Promise(r => setTimeout(r, 500));
   }

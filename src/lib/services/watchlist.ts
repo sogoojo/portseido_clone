@@ -116,12 +116,32 @@ async function ngxCandleStats(ticker: string): Promise<CandleStats | null> {
   return { high, low, ma50, ma200, ytdBase };
 }
 
+// YTD base = last close before Jan 1. A fixed window around the year boundary
+// keeps the price_cache coverage check valid all year after one Yahoo fetch.
+async function ytdBaseFor(ticker: string): Promise<number | null> {
+  const year = new Date().getFullYear();
+  const from = new Date(`${year - 1}-12-01T00:00:00Z`);
+  const to = new Date(`${year}-01-15T00:00:00Z`);
+  try {
+    const rows = await getHistoricalPrices(ticker, from, to);
+    const prior = rows.filter(r => r.date < `${year}-01-01`);
+    return prior.length ? prior[prior.length - 1].close : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getWatchlistRows(): Promise<WatchlistRow[]> {
   const items = getWatchlist();
 
   // One batched Yahoo/TradingView call for all uncached tickers
   const prices = await getMultipleCurrentPrices(items.map(i => i.ticker));
   const priceMap = new Map(prices.map(p => [p.ticker, p]));
+
+  // YTD base for global (Yahoo) tickers — NGX gets it from candle stats below
+  const globalTickers = items.filter(i => !i.ticker.startsWith('NSENG:')).map(i => i.ticker);
+  const ytdBases = await Promise.all(globalTickers.map(t => ytdBaseFor(t)));
+  const ytdBaseMap = new Map(globalTickers.map((t, i) => [t, ytdBases[i]]));
 
   // Candle-derived stats for NGX rows (cached in SQLite after the first load)
   const statsMap = new Map<string, CandleStats>();
@@ -182,7 +202,10 @@ export async function getWatchlistRows(): Promise<WatchlistRow[]> {
       thesis,
       analyst_upside: analystUpside,
       recommendation_key: analyst?.recommendation_key ?? null,
-      ytd_change: price != null && stats?.ytdBase ? (price - stats.ytdBase) / stats.ytdBase : null,
+      ytd_change: (() => {
+        const base = stats?.ytdBase ?? ytdBaseMap.get(item.ticker) ?? null;
+        return price != null && base ? (price - base) / base : null;
+      })(),
       stale: pr.stale,
     };
   });

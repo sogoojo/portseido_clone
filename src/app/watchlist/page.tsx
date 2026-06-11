@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { WatchlistRow, BuySignal, TrendState, ThesisState } from '@/lib/types';
 
 const SIGNAL_STYLE: Record<BuySignal, { text: string; chip: string; row: string }> = {
@@ -28,6 +28,39 @@ const money = (v: number | null, ccy = 'USD') =>
 const signedPct = (v: number | null) =>
   v == null ? '–' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
 
+type SortKey = 'distance' | 'pct_from_high' | 'ytd_change';
+type SortState = { key: SortKey; dir: 'asc' | 'desc' } | null;
+
+function SortableTh({ label, col, sort, onSort }: {
+  label: string;
+  col: SortKey;
+  sort: SortState;
+  onSort: (key: SortKey, dir: 'asc' | 'desc') => void;
+}) {
+  const active = sort?.key === col ? sort.dir : null;
+  const arrowCls = (dir: 'asc' | 'desc') =>
+    `block leading-none text-[9px] px-1 ${active === dir ? 'text-blue-600' : 'text-gray-300 hover:text-gray-600'}`;
+  return (
+    <th className="px-2 text-right font-medium"
+      aria-sort={active === 'asc' ? 'ascending' : active === 'desc' ? 'descending' : 'none'}>
+      <span className="inline-flex items-center">
+        <button type="button"
+          onClick={() => onSort(col, active === 'desc' ? 'asc' : 'desc')}
+          className={`uppercase tracking-wide hover:text-gray-700 ${active ? 'text-blue-600' : ''}`}
+          title={`Sort by ${label}`}>
+          {label}
+        </button>
+        <span className="inline-flex flex-col">
+          <button type="button" onClick={() => onSort(col, 'asc')} className={arrowCls('asc')}
+            title={`Sort ${label} ascending (worst first)`} aria-label={`Sort ${label} ascending`}>▲</button>
+          <button type="button" onClick={() => onSort(col, 'desc')} className={arrowCls('desc')}
+            title={`Sort ${label} descending (best first)`} aria-label={`Sort ${label} descending`}>▼</button>
+        </span>
+      </span>
+    </th>
+  );
+}
+
 function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: {
   rows: WatchlistRow[];
   onRemove: (ticker: string) => void;
@@ -36,6 +69,25 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [sort, setSort] = useState<SortState>(null);
+
+  // Clicking the active arrow again clears the sort (back to verdict order)
+  const toggleSort = useCallback((key: SortKey, dir: 'asc' | 'desc') => {
+    setSort(s => (s?.key === key && s.dir === dir ? null : { key, dir }));
+  }, []);
+
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+    const { key, dir } = sort;
+    return [...rows].sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1; // nulls last either direction
+      if (bv == null) return -1;
+      return dir === 'asc' ? av - bv : bv - av;
+    });
+  }, [rows, sort]);
 
   function startEdit(r: WatchlistRow) {
     setEditing(r.ticker);
@@ -63,16 +115,17 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
             <th className="px-2 text-right font-medium">Price</th>
             <th className="px-2 text-right font-medium">Fair entry</th>
             <th className="px-2 text-right font-medium">Anchor</th>
-            <th className="px-2 text-right font-medium">Distance</th>
+            <SortableTh label="Distance" col="distance" sort={sort} onSort={toggleSort} />
             <th className="px-2 text-center font-medium">Trend</th>
-            <th className="px-2 text-right font-medium">From 52w High</th>
-            <th className="px-2 text-right font-medium">{variant === 'ngx' ? 'YTD' : 'Analyst'}</th>
+            <SortableTh label="From 52w High" col="pct_from_high" sort={sort} onSort={toggleSort} />
+            <SortableTh label="YTD" col="ytd_change" sort={sort} onSort={toggleSort} />
+            {variant === 'global' && <th className="px-2 text-right font-medium">Analyst</th>}
             <th className="px-2 text-left font-medium">Notes</th>
             <th className="px-2 pr-3"></th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(r => {
+          {sortedRows.map(r => {
             const sig = SIGNAL_STYLE[r.signal];
             const displayTicker = r.ticker.replace(/^NSENG:/, '');
             return (
@@ -124,11 +177,10 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
                 <td className={`px-2 text-right tabular-nums ${r.pct_from_high == null ? 'text-gray-400' : r.pct_from_high < 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {signedPct(r.pct_from_high)}
                 </td>
-                {variant === 'ngx' ? (
-                  <td className={`px-2 text-right tabular-nums font-medium ${r.ytd_change == null ? 'text-gray-400' : r.ytd_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {signedPct(r.ytd_change)}
-                  </td>
-                ) : (
+                <td className={`px-2 text-right tabular-nums font-medium ${r.ytd_change == null ? 'text-gray-400' : r.ytd_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {signedPct(r.ytd_change)}
+                </td>
+                {variant === 'global' && (
                   <td className="px-2 text-right text-[11px] text-gray-500">
                     {r.recommendation_key ? r.recommendation_key.replace('_', ' ') : ''}
                     {r.analyst_upside != null && (

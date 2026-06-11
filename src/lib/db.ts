@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { seedAccounts } from './seed';
 import { seedTargets } from './seed-targets';
-import { seedWatchlist } from './seed-watchlist';
+import { seedWatchlist, seedNgxWatchlist } from './seed-watchlist';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'portseido-lite.db');
 const SCHEMA_PATH = path.join(process.cwd(), 'src', 'lib', 'schema.sql');
@@ -25,12 +25,20 @@ const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
 db.exec(schema);
 
 // Migrations
+// Column additions are idempotent via the duplicate-column check below.
+// Data migrations (like the track_cash defaults) must run ONCE — re-running
+// them on every boot would undo later user changes — so they are tracked
+// in the _migrations table.
+db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
+  name TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+
 const migrations = [
   `ALTER TABLE price_cache ADD COLUMN previous_close REAL`,
   `ALTER TABLE price_cache ADD COLUMN change REAL`,
   `ALTER TABLE price_cache ADD COLUMN change_pct REAL`,
   `ALTER TABLE accounts ADD COLUMN track_cash INTEGER NOT NULL DEFAULT 1`,
-  `UPDATE accounts SET track_cash = 0 WHERE id IN ('trading212', 'degiro', 'morgan-stanley', 'crypto', 'ngx')`,
   // Free structured analyst/fundamental signals on daily_summaries
   `ALTER TABLE daily_summaries ADD COLUMN recommendation_key TEXT`,
   `ALTER TABLE daily_summaries ADD COLUMN recommendation_mean REAL`,
@@ -59,12 +67,36 @@ const migrations = [
   `ALTER TABLE watchlist ADD COLUMN notes TEXT`,
 ];
 for (const sql of migrations) {
-  try { db.exec(sql); } catch { /* column already exists */ }
+  try {
+    db.exec(sql);
+  } catch (err) {
+    // Only an already-applied column addition is expected — anything else is
+    // a real migration failure and must not be silently swallowed
+    if (!/duplicate column name/i.test((err as Error).message)) throw err;
+  }
+}
+
+// One-time data migrations
+const dataMigrations: { name: string; sql: string }[] = [
+  {
+    name: 'track-cash-defaults',
+    sql: `UPDATE accounts SET track_cash = 0 WHERE id IN ('trading212', 'degiro', 'morgan-stanley', 'crypto', 'ngx')`,
+  },
+];
+const isApplied = db.prepare('SELECT 1 FROM _migrations WHERE name = ?');
+const markApplied = db.prepare('INSERT INTO _migrations (name) VALUES (?)');
+for (const m of dataMigrations) {
+  if (isApplied.get(m.name)) continue;
+  db.transaction(() => {
+    db.exec(m.sql);
+    markApplied.run(m.name);
+  })();
 }
 
 // Seed accounts on first connection
 seedAccounts(db);
 seedTargets(db);
 seedWatchlist(db);
+seedNgxWatchlist(db);
 
 export default db;

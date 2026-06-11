@@ -13,7 +13,7 @@ interface PortfolioSummaryProps {
   isAggregate: boolean;
   todayPnL: PnL;
   allTimeGain: number;
-  allTimeGainPct: number;
+  allTimeGainPct: number | null;
   totalDeposited: number;
 }
 
@@ -86,7 +86,7 @@ export default function PortfolioSummary({
             {gainSign}{formatMoney(allTimeGain, displayCurrency)}
           </p>
           <p className={`text-xs tabular-nums ${gainColor}`}>
-            {gainSign}{allTimeGainPct.toFixed(2)}%
+            {allTimeGainPct != null ? `${gainSign}${allTimeGainPct.toFixed(2)}%` : '—'}
           </p>
         </div>
       </div>

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useApi } from '@/lib/hooks';
 
 interface CounterfactualData {
   counterfactual_value: number;
@@ -23,22 +23,16 @@ function formatMoney(value: number): string {
 export default function CounterfactualCard() {
   const searchParams = useSearchParams();
   const account = searchParams.get('account') || 'all';
-  const [data, setData] = useState<CounterfactualData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/portfolio/counterfactual?account=${account}`)
-      .then(r => r.json())
-      .then(json => { if (json.data) setData(json.data); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account]);
+  const { data: body, loading } = useApi<{ data: CounterfactualData }>(
+    `/api/portfolio/counterfactual?account=${account}`
+  );
+  const data = body?.data || null;
 
   if (loading) {
     return <div className="animate-pulse rounded-lg bg-gray-200 h-32" />;
   }
 
+  // No deposits recorded (or fetch failed): the comparison is meaningless
   if (!data || data.total_deposited === 0) {
     return null;
   }

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import type { Transaction, TransactionType, Account } from '@/lib/types';
+import { useAccounts } from '@/lib/hooks';
+import type { Transaction, TransactionType } from '@/lib/types';
 
 interface TransactionFormProps {
   transaction?: Transaction | null;
@@ -17,7 +18,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
   const globalAccount = searchParams.get('account') || 'all';
   const isEdit = !!transaction;
 
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const accounts = useAccounts();
   const [type, setType] = useState<TransactionType>(transaction?.type || 'buy');
   const [accountId, setAccountId] = useState(transaction?.account_id || (globalAccount !== 'all' ? globalAccount : ''));
   const [date, setDate] = useState(transaction?.date || new Date().toISOString().split('T')[0]);
@@ -31,27 +32,29 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // Auto-fill currency from the pre-selected account once accounts load
   useEffect(() => {
-    fetch('/api/accounts')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.data) {
-          setAccounts(json.data);
-          // Auto-set currency from selected account
-          if (!currency && accountId) {
-            const acct = json.data.find((a: Account) => a.id === accountId);
-            if (acct) setCurrency(acct.currency);
-          }
-        }
-      })
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!currency && accountId && accounts.length > 0) {
+      const acct = accounts.find((a) => a.id === accountId);
+      if (acct) setCurrency(acct.currency);
+    }
+  }, [accounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-set currency when account changes
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Currency follows the selected account (switching Degiro→Trading212
+  // should flip EUR→USD, not keep the old currency)
   function handleAccountChange(id: string) {
     setAccountId(id);
     const acct = accounts.find((a) => a.id === id);
-    if (acct && !currency) setCurrency(acct.currency);
+    if (acct) setCurrency(acct.currency);
   }
 
   const needsTicker = type === 'buy' || type === 'sell' || type === 'dividend';
@@ -120,6 +123,9 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEdit ? 'Edit Transaction' : 'Add Transaction'}
         className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -127,7 +133,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
           <h2 className="text-lg font-semibold text-gray-900">
             {isEdit ? 'Edit Transaction' : 'Add Transaction'}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">
+          <button onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600 text-xl leading-none">
             &times;
           </button>
         </div>

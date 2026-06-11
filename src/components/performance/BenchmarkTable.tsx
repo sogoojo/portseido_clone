@@ -2,8 +2,8 @@
 
 interface PeriodReturn {
   period: string;
-  mwr?: number;
-  return_pct?: number;
+  mwr?: number | null;
+  return_pct?: number | null;
 }
 
 interface BenchmarkTableProps {
@@ -21,7 +21,8 @@ function getReturnForPeriod(returns: PeriodReturn[], period: string): number | n
 }
 
 function ReturnCell({ value, isWorst }: { value: number | null; isWorst: boolean }) {
-  if (value === null || value === 0) {
+  // null = no data; a genuine 0.00% still renders as a number
+  if (value === null) {
     return <td className="px-3 py-2.5 text-center text-sm tabular-nums text-gray-400">—</td>;
   }
 

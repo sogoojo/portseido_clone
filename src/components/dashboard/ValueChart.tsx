@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useApi } from '@/lib/hooks';
 import {
   AreaChart,
   Area,
@@ -52,17 +53,10 @@ export default function ValueChart() {
   const searchParams = useSearchParams();
   const account = searchParams.get('account') || 'all';
   const [range, setRange] = useState<string>('1Y');
-  const [data, setData] = useState<DataPoint[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/portfolio/history?account=${account}&range=${range}`)
-      .then(r => r.json())
-      .then(json => { if (json.data) setData(json.data); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account, range]);
+  const { data: body, loading, error } = useApi<{ data: DataPoint[] }>(
+    `/api/portfolio/history?account=${account}&range=${range}`
+  );
+  const data = body?.data || [];
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5">
@@ -85,6 +79,10 @@ export default function ValueChart() {
 
       {loading ? (
         <div className="animate-pulse bg-gray-100 rounded h-64" />
+      ) : error ? (
+        <div className="flex items-center justify-center h-64 text-red-500 text-sm">
+          Failed to load chart: {error}
+        </div>
       ) : data.length === 0 ? (
         <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
           No data available for this period
@@ -103,8 +101,11 @@ export default function ValueChart() {
               dataKey="date"
               tick={{ fontSize: 11, fill: '#9ca3af' }}
               tickFormatter={(d: string) => {
-                const date = new Date(d);
-                return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                // Format from the string parts — new Date('YYYY-MM-DD') is UTC
+                // midnight and shifts a month back in negative-offset timezones
+                const [y, m] = d.split('-');
+                const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return `${MONTHS[parseInt(m, 10) - 1]} ${y.slice(-2)}`;
               }}
               interval="preserveStartEnd"
             />

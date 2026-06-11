@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useApi } from '@/lib/hooks';
 import AllocationPie from '@/components/allocation/AllocationPie';
 import AllocationStats from '@/components/allocation/AllocationStats';
 import HoldingsTable from '@/components/allocation/HoldingsTable';
@@ -12,7 +13,7 @@ import type { PortfolioHolding } from '@/lib/types';
 interface PortfolioData {
   holdings: PortfolioHolding[];
   total_usd?: number;
-  accounts?: Array<{ cash: number; value_usd: number }>;
+  accounts?: Array<{ cash: number; cash_usd: number; value_usd: number }>;
   value?: number;
   cash?: number;
   currency?: string;
@@ -21,17 +22,8 @@ interface PortfolioData {
 function AllocationContent() {
   const searchParams = useSearchParams();
   const account = searchParams.get('account') || 'all';
-  const [data, setData] = useState<PortfolioData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/portfolio?account=${account}`)
-      .then(r => r.json())
-      .then(json => { if (json.data) setData(json.data); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account]);
+  const { data: body, loading, error } = useApi<{ data: PortfolioData }>(`/api/portfolio?account=${account}`);
+  const data = body?.data || null;
 
   const holdings = data?.holdings || [];
 
@@ -41,7 +33,8 @@ function AllocationContent() {
 
   if (data) {
     if (data.accounts) {
-      cashBalance = data.accounts.reduce((s, a) => s + (a.cash || 0), 0);
+      // Per-account cash is in the account's own currency — sum the USD values
+      cashBalance = data.accounts.reduce((s, a) => s + (a.cash_usd || 0), 0);
       totalValue = data.total_usd || 0;
       displayCurrency = 'USD';
     } else {
@@ -55,6 +48,12 @@ function AllocationContent() {
     <div className="space-y-6">
       {/* Broker Tabs */}
       <BrokerTabs />
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          Failed to load allocation: {error}
+        </div>
+      )}
 
       {loading ? (
         <>
@@ -76,8 +75,8 @@ function AllocationContent() {
         <>
           {/* Two donut charts side by side */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <AllocationPie holdings={holdings} cashBalance={cashBalance} defaultGroupMode="holding" title="By Holding" />
-            <AllocationPie holdings={holdings} cashBalance={cashBalance} defaultGroupMode="sector" title="By Sector" />
+            <AllocationPie holdings={holdings} cashBalance={cashBalance} currency={displayCurrency} defaultGroupMode="holding" title="By Holding" />
+            <AllocationPie holdings={holdings} cashBalance={cashBalance} currency={displayCurrency} defaultGroupMode="sector" title="By Sector" />
           </div>
 
           {/* Stats row */}
@@ -91,7 +90,7 @@ function AllocationContent() {
           {/* Holdings table */}
           <HoldingsTable
             holdings={holdings}
-            totalValue={totalValue}
+            currency={displayCurrency}
           />
         </>
       )}

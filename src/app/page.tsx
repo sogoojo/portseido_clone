@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import PortfolioSummary from '@/components/dashboard/PortfolioSummary';
 import InfoTabs from '@/components/dashboard/InfoTabs';
@@ -9,6 +9,7 @@ import AccountCards from '@/components/dashboard/AccountCards';
 import ValueChart from '@/components/dashboard/ValueChart';
 import BrokerTabs from '@/components/layout/BrokerTabs';
 import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
+import { useApi } from '@/lib/hooks';
 
 function DashboardContent() {
   const searchParams = useSearchParams();
@@ -16,21 +17,12 @@ function DashboardContent() {
   const isAggregate = account === 'all';
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [portfolio, setPortfolio] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/portfolio?account=${account}`)
-      .then(r => r.json())
-      .then(json => { if (json.data) setPortfolio(json.data); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account]);
+  const { data: body, loading, error } = useApi<{ data: any }>(`/api/portfolio?account=${account}`);
+  const portfolio = body?.data;
 
   const allTimePnl = portfolio?.all_time_pnl;
   const allTimeGain = allTimePnl?.total ?? 0;
-  const allTimeGainPct = allTimePnl?.total_pct ?? 0;
+  const allTimeGainPct = allTimePnl?.total_pct ?? null;
   const totalDeposited = portfolio?.total_deposited ?? 0;
   const displayCurrency = isAggregate ? 'USD' : portfolio?.currency || 'USD';
 
@@ -38,6 +30,12 @@ function DashboardContent() {
     <div className="space-y-6">
       {/* Broker Tabs */}
       <BrokerTabs />
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          Failed to load portfolio: {error}
+        </div>
+      )}
 
       {/* Empty state */}
       {!loading && portfolio && (portfolio.holdings || []).length === 0 && (

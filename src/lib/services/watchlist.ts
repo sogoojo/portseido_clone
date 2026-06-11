@@ -1,6 +1,6 @@
 import db from '@/lib/db';
 import { getWatchlist } from './summaries';
-import { getCurrentPrice } from './prices';
+import { getMultipleCurrentPrices, getHistoricalPrices } from './prices';
 import type { WatchlistRow, BuySignal, TrendState, ThesisState, EarningsTrendPoint } from '@/lib/types';
 
 // Cheapness grade: how far below the (dynamic) fair entry the price trades.
@@ -41,11 +41,13 @@ interface AnalystRow {
   earnings_trend: string | null;
 }
 
+const latestAnalystStmt = db.prepare(
+  `SELECT target_mean, recommendation_key, earnings_trend FROM daily_summaries
+   WHERE ticker = ? ORDER BY date DESC LIMIT 1`
+);
+
 function latestAnalyst(ticker: string): AnalystRow | null {
-  const row = db.prepare(
-    `SELECT target_mean, recommendation_key, earnings_trend FROM daily_summaries
-     WHERE ticker = ? ORDER BY date DESC LIMIT 1`
-  ).get(ticker) as AnalystRow | undefined;
+  const row = latestAnalystStmt.get(ticker) as AnalystRow | undefined;
   return row ?? null;
 }
 
@@ -78,19 +80,70 @@ function verdictFor(cheapness: BuySignal, knife: boolean, thesis: ThesisState): 
   return cheapness;
 }
 
+// NGX quotes don't carry 52w range or moving averages (no Yahoo data) —
+// compute them from the cached TradingView candle history instead.
+interface CandleStats {
+  high: number | null;
+  low: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  ytdBase: number | null; // last close before Jan 1 of the current year
+}
+
+async function ngxCandleStats(ticker: string): Promise<CandleStats | null> {
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - 430); // 200 trading days ≈ 290 calendar + 52w window
+  const rows = await getHistoricalPrices(ticker, from, to);
+  if (rows.length === 0) return null;
+
+  const closes = rows.map(r => r.close);
+  const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const ma50 = closes.length >= 30 ? avg(closes.slice(-50)) : null;
+  const ma200 = closes.length >= 120 ? avg(closes.slice(-200)) : null;
+
+  const yearAgo = new Date(to);
+  yearAgo.setDate(yearAgo.getDate() - 365);
+  const yearAgoStr = yearAgo.toISOString().split('T')[0];
+  const lastYear = rows.filter(r => r.date >= yearAgoStr);
+  const high = lastYear.length ? Math.max(...lastYear.map(r => r.high ?? r.close)) : null;
+  const low = lastYear.length ? Math.min(...lastYear.map(r => r.low ?? r.close)) : null;
+
+  const jan1 = `${to.getFullYear()}-01-01`;
+  const priorYearRows = rows.filter(r => r.date < jan1);
+  const ytdBase = priorYearRows.length ? priorYearRows[priorYearRows.length - 1].close : null;
+
+  return { high, low, ma50, ma200, ytdBase };
+}
+
 export async function getWatchlistRows(): Promise<WatchlistRow[]> {
   const items = getWatchlist();
 
-  const rows = await Promise.all(items.map(async (item): Promise<WatchlistRow> => {
-    const pr = await getCurrentPrice(item.ticker);
+  // One batched Yahoo/TradingView call for all uncached tickers
+  const prices = await getMultipleCurrentPrices(items.map(i => i.ticker));
+  const priceMap = new Map(prices.map(p => [p.ticker, p]));
+
+  // Candle-derived stats for NGX rows (cached in SQLite after the first load)
+  const statsMap = new Map<string, CandleStats>();
+  for (const item of items) {
+    if (!item.ticker.startsWith('NSENG:')) continue;
+    const stats = await ngxCandleStats(item.ticker);
+    if (stats) statsMap.set(item.ticker, stats);
+  }
+
+  const rows = items.map((item): WatchlistRow => {
+    const pr = priceMap.get(item.ticker)!;
+    const stats = statsMap.get(item.ticker);
     const price = pr.price;
-    const high = pr.fiftyTwoWeekHigh;
-    const low = pr.fiftyTwoWeekLow;
+    const high = pr.fiftyTwoWeekHigh ?? stats?.high ?? null;
+    const low = pr.fiftyTwoWeekLow ?? stats?.low ?? null;
+    const ma50 = pr.fiftyDayAverage ?? stats?.ma50 ?? null;
+    const ma200 = pr.twoHundredDayAverage ?? stats?.ma200 ?? null;
     const analyst = latestAnalyst(item.ticker);
 
     // Dynamic "fair entry" = blend of (200-day MA − 5%) and (analyst target − 20%).
     const candidates: number[] = [];
-    if (pr.twoHundredDayAverage != null) candidates.push(pr.twoHundredDayAverage * 0.95);
+    if (ma200 != null) candidates.push(ma200 * 0.95);
     if (analyst?.target_mean != null) candidates.push(analyst.target_mean * 0.80);
     const dynamicTarget = candidates.length
       ? candidates.reduce((a, b) => a + b, 0) / candidates.length
@@ -106,8 +159,8 @@ export async function getWatchlistRows(): Promise<WatchlistRow[]> {
     const analystUpside =
       analyst?.target_mean != null && price ? (analyst.target_mean - price) / price : null;
 
-    const trend = trendFor(price, pr.fiftyDayAverage, pr.twoHundredDayAverage);
-    const knife = isKnife(trend, price, low, high, pr.twoHundredDayAverage);
+    const trend = trendFor(price, ma50, ma200);
+    const knife = isKnife(trend, price, low, high, ma200);
     const thesis = thesisFor(analyst?.earnings_trend ?? null);
     const cheapness = cheapnessFor(distance);
     const signal = verdictFor(cheapness, knife, thesis);
@@ -129,9 +182,10 @@ export async function getWatchlistRows(): Promise<WatchlistRow[]> {
       thesis,
       analyst_upside: analystUpside,
       recommendation_key: analyst?.recommendation_key ?? null,
+      ytd_change: price != null && stats?.ytdBase ? (price - stats.ytdBase) / stats.ytdBase : null,
       stale: pr.stale,
     };
-  }));
+  });
 
   // Best verdicts first.
   const order: Record<BuySignal, number> = { strong_buy: 0, buy: 1, watch: 2, hold: 3, avoid: 4, none: 5 };

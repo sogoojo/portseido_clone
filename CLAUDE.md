@@ -8,7 +8,7 @@ Personal portfolio tracker — lightweight Portseido replacement. Single user, n
 - Tailwind CSS for styling (light mode only)
 - Recharts for all charts (line, area, bar, pie)
 - yahoo-finance2 for US/EU equity prices, crypto (BTC-USD, ETH-USD), FX (EURUSD=X, NGNEUR=X), benchmarks (^GSPC, ^IXIC)
-- @mathieuc/tradingview for NGX (Nigerian) stock prices (NSENG:MTNN, NSENG:ZENITHBANK, etc.)
+- @mathieuc/tradingview for NGX (Nigerian) stock prices (NSENG:MTNN, NSENG:ZENITHBANK, etc.) — anonymous websocket, daily candles, no API key; see `src/lib/services/tradingview.ts`
 
 ## Architecture
 - All data derives from the `transactions` table — it is the single source of truth
@@ -16,7 +16,8 @@ Personal portfolio tracker — lightweight Portseido replacement. Single user, n
 - API routes in `src/app/api/` are thin wrappers around services
 - SQLite is accessed synchronously via better-sqlite3 — no async DB calls
 - Price/FX data cached in SQLite with 15-minute staleness window
-- Price service routes to Yahoo Finance (US/EU/crypto/FX) or TradingView (NGX) based on ticker
+- Price service routes to Yahoo Finance (US/EU/crypto/FX) or TradingView (NGX) based on ticker; NGX freshness keys off fetched_at since candles are dated by trading day
+- Historical valuation (history chart, period MWR, historical returns) goes through `src/lib/services/history.ts` — FIFO replay + historical prices + historical FX to USD
 
 ## Key Patterns
 - **FIFO cost basis** for holdings calculation

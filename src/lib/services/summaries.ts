@@ -142,19 +142,31 @@ export function addToWatchlist(
   name?: string,
   opts?: { target_entry?: number | null; tier?: number | null; notes?: string | null }
 ): WatchlistItem {
+  // COALESCE everywhere: re-adding an existing ticker without explicit values
+  // must not wipe its existing target/tier/notes (e.g. the seeded thesis data)
   db.prepare(
     `INSERT INTO watchlist (ticker, name, target_entry, tier, notes) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(ticker) DO UPDATE SET
        name = COALESCE(excluded.name, watchlist.name),
-       target_entry = excluded.target_entry,
-       tier = excluded.tier,
-       notes = excluded.notes`
+       target_entry = COALESCE(excluded.target_entry, watchlist.target_entry),
+       tier = COALESCE(excluded.tier, watchlist.tier),
+       notes = COALESCE(excluded.notes, watchlist.notes)`
   ).run(ticker, name ?? null, opts?.target_entry ?? null, opts?.tier ?? null, opts?.notes ?? null);
   return db.prepare('SELECT * FROM watchlist WHERE ticker = ?').get(ticker) as WatchlistItem;
 }
 
 export function removeFromWatchlist(ticker: string): void {
   db.prepare('DELETE FROM watchlist WHERE ticker = ?').run(ticker);
+}
+
+/**
+ * Explicitly set (or clear, with null) a watchlist anchor price. Unlike
+ * addToWatchlist this does NOT coalesce — null really clears the anchor.
+ */
+export function updateWatchlistTarget(ticker: string, targetEntry: number | null): WatchlistItem | null {
+  const result = db.prepare('UPDATE watchlist SET target_entry = ? WHERE ticker = ?').run(targetEntry, ticker);
+  if (result.changes === 0) return null;
+  return db.prepare('SELECT * FROM watchlist WHERE ticker = ?').get(ticker) as WatchlistItem;
 }
 
 // --- Daily summary runner ---
@@ -199,7 +211,9 @@ async function fetchBraveNews(ticker: string, companyName?: string): Promise<New
       title: r.title,
       url: r.url,
       publisher: r.meta_url?.hostname || 'Unknown',
-      published_at: r.age || new Date().toISOString(),
+      // r.age is a relative string ("2 hours ago"), not a timestamp —
+      // page_age is the ISO one; fall back to fetch time (freshness=pd)
+      published_at: r.page_age || new Date().toISOString(),
       snippet: r.description,
     }));
   } catch {
@@ -362,6 +376,8 @@ const upsertSummary = db.prepare(`
     fetched_at = datetime('now')
 `);
 
+const tickerNameStmt = db.prepare('SELECT name FROM ticker_metadata WHERE ticker = ?');
+
 async function processTicker(ticker: string, date: string, backfill = false): Promise<boolean> {
   if (ticker.startsWith('NSENG:')) return false;
 
@@ -410,8 +426,7 @@ async function processTicker(ticker: string, date: string, backfill = false): Pr
 
     if (close == null) return false;
 
-    const meta = db.prepare('SELECT name FROM ticker_metadata WHERE ticker = ?')
-      .get(ticker) as { name: string } | undefined;
+    const meta = tickerNameStmt.get(ticker) as { name: string } | undefined;
 
     const [yahooNews, braveNews, signals] = await Promise.all([
       fetchYahooNews(ticker),
@@ -464,7 +479,9 @@ export async function runDailySummaries(
   // A past target date means a backfill: pull each ticker's actual historical bar
   // for that day rather than the live quote.
   const backfill = date < today;
-  const tickers = getTickersToSummarize();
+  // NGX tickers have no Yahoo feed — exclude them so `total` reflects tickers
+  // that can actually succeed (otherwise success can never reach total)
+  const tickers = getTickersToSummarize().filter(t => !t.startsWith('NSENG:'));
   if (tickers.length === 0) return { date, success: 0, total: 0 };
 
   let success = 0;

@@ -1,8 +1,8 @@
 import db from '@/lib/db';
-import { getHistoricalPrices, getCurrentPrice } from '@/lib/services/prices';
+import { getHistoricalPrices } from '@/lib/services/prices';
 import { convert } from '@/lib/services/fx';
 import { getPortfolioValue, getAggregateValue } from '@/lib/services/portfolio';
-import type { Transaction, Account } from '@/lib/types';
+import { buildValuationContext } from '@/lib/services/history';
 
 // --- MWR / IRR via Newton-Raphson ---
 
@@ -79,7 +79,7 @@ export function calculateMWR(cashFlows: CashFlow[], finalValue: number, finalDat
 const PERIODS = ['1M', '3M', '6M', 'YTD', '1Y', '2Y', '5Y', 'All'] as const;
 export type Period = (typeof PERIODS)[number];
 
-function getPeriodStartDate(period: Period): Date {
+function getPeriodStartDate(period: Period, firstTxDate?: string | null): Date {
   const now = new Date();
   switch (period) {
     case '1M': return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
@@ -91,6 +91,7 @@ function getPeriodStartDate(period: Period): Date {
     case '5Y': return new Date(now.getFullYear() - 5, now.getMonth(), now.getDate());
     case 'All':
     default: {
+      if (firstTxDate) return new Date(firstTxDate);
       const first = db.prepare('SELECT MIN(date) as d FROM transactions').get() as { d: string | null };
       return first.d ? new Date(first.d) : new Date(now.getFullYear() - 1, 0, 1);
     }
@@ -101,14 +102,14 @@ function getPeriodStartDate(period: Period): Date {
 
 export interface PeriodReturn {
   period: string;
-  mwr: number;
+  /** Cumulative money-weighted return over the period as a fraction (0.1 = +10%). null = no data for the period. */
+  mwr: number | null;
 }
 
 export async function getPortfolioReturns(accountId?: string): Promise<PeriodReturn[]> {
   const now = new Date();
-  const results: PeriodReturn[] = [];
 
-  // Get current portfolio value
+  // Current portfolio value in USD (live prices)
   let currentValue: number;
   if (!accountId || accountId === 'all') {
     const agg = await getAggregateValue();
@@ -118,58 +119,65 @@ export async function getPortfolioReturns(accountId?: string): Promise<PeriodRet
     currentValue = await convert(pv.value, pv.currency, 'USD');
   }
 
-  // Get all cash flow transactions
-  const condition = accountId && accountId !== 'all' ? 'AND t.account_id = ?' : '';
-  const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
+  const ctx = await buildValuationContext(accountId === 'all' ? undefined : accountId, now);
+  if (!ctx.firstDate) {
+    return PERIODS.map(period => ({ period, mwr: null }));
+  }
 
-  const allTxs = db.prepare(
-    `SELECT t.date, t.type, t.amount, t.quantity, t.price_per_unit, t.commission, t.currency, a.currency as account_currency
-     FROM transactions t
-     JOIN accounts a ON t.account_id = a.id
-     WHERE t.type IN ('deposit', 'withdrawal') ${condition}
-     ORDER BY t.date`
-  ).all(...params) as (Pick<Transaction, 'date' | 'type' | 'amount' | 'quantity' | 'price_per_unit' | 'commission' | 'currency'> & { account_currency: string })[];
+  // Evaluate periods oldest-start first so the valuation replay runs forward
+  const ordered = PERIODS
+    .map(period => ({ period, start: getPeriodStartDate(period, ctx.firstDate) }))
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
 
-  for (const period of PERIODS) {
-    const startDate = getPeriodStartDate(period);
-    const startStr = startDate.toISOString().split('T')[0];
+  const byPeriod = new Map<string, number | null>();
 
-    // Filter cash flows to this period
-    const periodTxs = allTxs.filter(tx => tx.date >= startStr);
+  for (const { period, start } of ordered) {
+    const startStr = start.toISOString().split('T')[0];
 
-    if (periodTxs.length === 0) {
-      results.push({ period, mwr: 0 });
-      continue;
-    }
+    // Portfolio value at the period start is the opening cash flow — without
+    // it, a period's MWR is meaningless (a month with no deposits is not 0%)
+    const startValue = startStr > ctx.firstDate ? ctx.valueAt(startStr).total : 0;
 
-    // Build cash flows: deposits negative, withdrawals positive
     const cashFlows: CashFlow[] = [];
-    for (const tx of periodTxs) {
-      const amountUsd = await convert(tx.amount || 0, tx.currency || tx.account_currency, 'USD');
-      if (tx.type === 'deposit') {
-        cashFlows.push({ date: new Date(tx.date), amount: -amountUsd });
-      } else if (tx.type === 'withdrawal') {
-        cashFlows.push({ date: new Date(tx.date), amount: amountUsd });
+    if (startValue > 0.01) {
+      cashFlows.push({ date: start, amount: -startValue });
+    }
+    // Flows strictly after the start date — the start value already includes
+    // everything up to and including startStr
+    for (const f of ctx.flows) {
+      if (f.date > startStr) {
+        cashFlows.push({ date: new Date(f.date), amount: f.amountUsd });
       }
     }
 
     if (cashFlows.length === 0) {
-      results.push({ period, mwr: 0 });
+      byPeriod.set(period, null);
       continue;
     }
 
-    const mwr = calculateMWR(cashFlows, currentValue, now);
-    results.push({ period, mwr: isFinite(mwr) ? mwr : 0 });
+    const annualised = calculateMWR(cashFlows, currentValue, now);
+    if (!isFinite(annualised)) {
+      byPeriod.set(period, null);
+      continue;
+    }
+
+    // Convert the annualised IRR into a cumulative return over the period so
+    // it is directly comparable with benchmark period returns
+    const t0 = cashFlows[0].date.getTime();
+    const years = (now.getTime() - t0) / (1000 * 60 * 60 * 24 * 365);
+    const cumulative = years > 0 ? Math.pow(1 + annualised, years) - 1 : 0;
+    byPeriod.set(period, isFinite(cumulative) ? cumulative : null);
   }
 
-  return results;
+  return PERIODS.map(period => ({ period, mwr: byPeriod.get(period) ?? null }));
 }
 
 // --- Benchmark Returns ---
 
 export interface BenchmarkReturn {
   period: string;
-  return_pct: number;
+  /** Cumulative simple return over the period in percent. null = no data. */
+  return_pct: number | null;
 }
 
 export async function getBenchmarkReturns(symbol: string): Promise<BenchmarkReturn[]> {
@@ -182,16 +190,16 @@ export async function getBenchmarkReturns(symbol: string): Promise<BenchmarkRetu
     try {
       const history = await getHistoricalPrices(symbol, startDate, now);
       if (history.length < 2) {
-        results.push({ period, return_pct: 0 });
+        results.push({ period, return_pct: null });
         continue;
       }
 
       const startPrice = history[0].close;
       const endPrice = history[history.length - 1].close;
-      const returnPct = startPrice > 0 ? ((endPrice - startPrice) / startPrice) * 100 : 0;
+      const returnPct = startPrice > 0 ? ((endPrice - startPrice) / startPrice) * 100 : null;
       results.push({ period, return_pct: returnPct });
     } catch {
-      results.push({ period, return_pct: 0 });
+      results.push({ period, return_pct: null });
     }
   }
 
@@ -202,25 +210,19 @@ export async function getBenchmarkReturns(symbol: string): Promise<BenchmarkRetu
 
 export interface HistoricalReturn {
   period: string;
-  return_pct: number;
+  /** Portfolio return for the period in percent (simple Dietz). null = not computable. */
+  return_pct: number | null;
 }
 
 export async function getHistoricalReturns(
   accountId?: string,
   granularity: 'monthly' | 'quarterly' | 'annually' = 'monthly'
 ): Promise<HistoricalReturn[]> {
-  // Get all transactions to find date range
-  const condition = accountId && accountId !== 'all' ? 'AND account_id = ?' : '';
-  const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
-
-  const firstTx = db.prepare(
-    `SELECT MIN(date) as d FROM transactions WHERE 1=1 ${condition}`
-  ).get(...params) as { d: string | null };
-
-  if (!firstTx.d) return [];
-
-  const startDate = new Date(firstTx.d);
   const now = new Date();
+  const ctx = await buildValuationContext(accountId === 'all' ? undefined : accountId, now);
+  if (!ctx.firstDate) return [];
+
+  const startDate = new Date(ctx.firstDate);
   const results: HistoricalReturn[] = [];
 
   // Generate period boundaries
@@ -250,25 +252,27 @@ export async function getHistoricalReturns(
     }
   }
 
-  // For simplicity, compute simple return for each period using S&P 500 as a proxy
-  // for portfolio value change. A full implementation would replay transactions per period.
-  // We use the portfolio's deposit-weighted approach.
+  // Actual portfolio return per period via simple Dietz:
+  // r = (V_end - V_start - F) / (V_start + F/2), F = net external flows
   for (const b of boundaries.slice(-24)) { // Limit to last 24 periods
-    try {
-      // Use ^GSPC as a reference for period returns (simplified approach)
-      // In a full implementation, we'd compute actual portfolio value at each boundary
-      const history = await getHistoricalPrices('^GSPC', b.start, b.end);
-      if (history.length >= 2) {
-        const startPrice = history[0].close;
-        const endPrice = history[history.length - 1].close;
-        const ret = startPrice > 0 ? ((endPrice - startPrice) / startPrice) * 100 : 0;
-        results.push({ period: b.label, return_pct: ret });
-      } else {
-        results.push({ period: b.label, return_pct: 0 });
-      }
-    } catch {
-      results.push({ period: b.label, return_pct: 0 });
+    const dayBeforeStart = new Date(b.start);
+    dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
+    const startStr = dayBeforeStart.toISOString().split('T')[0];
+    const end = b.end < now ? b.end : now;
+    const endStr = end.toISOString().split('T')[0];
+
+    const vStart = ctx.valueAt(startStr);
+    const vEnd = ctx.valueAt(endStr);
+    const netFlow = vEnd.net_deposits - vStart.net_deposits;
+
+    const denominator = vStart.total + netFlow / 2;
+    if (denominator <= 0.01) {
+      results.push({ period: b.label, return_pct: null });
+      continue;
     }
+
+    const ret = ((vEnd.total - vStart.total - netFlow) / denominator) * 100;
+    results.push({ period: b.label, return_pct: isFinite(ret) ? ret : null });
   }
 
   return results;

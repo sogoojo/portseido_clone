@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { parseCsv } from '@/lib/services/import';
 import type { Account } from '@/lib/types';
 
 interface CsvImportProps {
@@ -30,12 +31,13 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   function parseCsvPreview(text: string): { headers: string[]; rows: PreviewRow[] } {
-    const lines = text.split('\n').filter((l) => l.trim());
-    if (lines.length < 2) return { headers: [], rows: [] };
+    // Quote-aware parse — a naive split(',') shifts every column after a
+    // value like "Apple, Inc." or "1,234.56"
+    const records = parseCsv(text);
+    if (records.length < 2) return { headers: [], rows: [] };
 
-    const hdrs = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-    const rows = lines.slice(1).map((line) => {
-      const vals = line.split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
+    const hdrs = records[0];
+    const rows = records.slice(1).map((vals) => {
       const row: PreviewRow = {};
       hdrs.forEach((h, i) => {
         if (h) row[h] = vals[i] || '';
@@ -75,37 +77,10 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
     setResult(null);
 
     try {
-      let body: Record<string, unknown>;
-
-      if (broker !== 'generic') {
-        // Send raw CSV to server for broker-specific parsing
-        body = { account_id: accountId, broker, csv_content: rawCsv };
-      } else {
-        // Generic: map CSV rows client-side
-        const transactions = allRows.map((row) => {
-          const get = (keys: string[]): string => {
-            for (const k of keys) {
-              const match = Object.keys(row).find((h) => h.toLowerCase() === k.toLowerCase());
-              if (match && row[match]) return row[match];
-            }
-            return '';
-          };
-
-          return {
-            date: get(['date', 'Date', 'trade_date', 'Trade Date']),
-            type: get(['type', 'action', 'Action', 'Type', 'side', 'Side']).toLowerCase(),
-            ticker: get(['ticker', 'symbol', 'Ticker', 'Symbol', 'ISIN', 'isin']),
-            quantity: parseFloat(get(['quantity', 'shares', 'Quantity', 'Shares', 'qty', 'Qty'])) || null,
-            price_per_unit: parseFloat(get(['price', 'price_per_unit', 'Price', 'Price per unit', 'unit_price'])) || null,
-            amount: parseFloat(get(['amount', 'total', 'Amount', 'Total', 'value', 'Value'])) || null,
-            currency: get(['currency', 'Currency', 'ccy']),
-            commission: parseFloat(get(['commission', 'fee', 'Commission', 'Fee', 'fees', 'Fees'])) || 0,
-            notes: get(['notes', 'Notes', 'description', 'Description']),
-          };
-        }).filter((t) => t.date);
-
-        body = { account_id: accountId, transactions };
-      }
+      // Always send the raw CSV — the server parsers handle quoting,
+      // thousands separators, date normalisation and sign conventions in
+      // one place instead of a divergent client-side re-implementation
+      const body = { account_id: accountId, broker, csv_content: rawCsv };
 
       const res = await fetch('/api/transactions/import', {
         method: 'POST',
@@ -114,7 +89,8 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
       });
       const json = await res.json();
       if (res.ok) {
-        setResult(`Imported ${json.data.imported} transactions`);
+        const skipped = json.data.skipped > 0 ? `, skipped ${json.data.skipped} duplicate${json.data.skipped === 1 ? '' : 's'}` : '';
+        setResult(`Imported ${json.data.imported} transactions${skipped}`);
         setAllRows([]);
         setPreview([]);
         setHeaders([]);

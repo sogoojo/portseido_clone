@@ -5,7 +5,7 @@ import type { PortfolioHolding } from '@/lib/types';
 
 interface HoldingsTableProps {
   holdings: PortfolioHolding[];
-  totalValue: number;
+  currency?: string;
 }
 
 type SortKey =
@@ -19,10 +19,14 @@ function fmt(value: number, decimals = 2): string {
   return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-function fmtMoney(value: number): string {
+function currencySymbol(currency?: string): string {
+  return currency === 'EUR' ? '€' : currency === 'NGN' ? '₦' : '$';
+}
+
+function fmtMoney(value: number, currency?: string): string {
   const sign = value < 0 ? '-' : '';
   const abs = Math.abs(value);
-  return `${sign}$${fmt(abs)}`;
+  return `${sign}${currencySymbol(currency)}${fmt(abs)}`;
 }
 
 function fmtPct(value: number): string {
@@ -56,7 +60,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'left' | 'right' }[] = [
   { key: 'quantity', label: 'Shares', align: 'right' },
 ];
 
-export default function HoldingsTable({ holdings, totalValue }: HoldingsTableProps) {
+export default function HoldingsTable({ holdings, currency }: HoldingsTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('market_value');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -102,7 +106,11 @@ export default function HoldingsTable({ holdings, totalValue }: HoldingsTablePro
             {COLUMNS.map(col => (
               <th
                 key={col.key}
+                scope="col"
+                tabIndex={0}
                 onClick={() => handleSort(col.key)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort(col.key); } }}
+                aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 className={`px-3 py-2.5 font-medium text-gray-500 cursor-pointer select-none hover:text-gray-900 whitespace-nowrap ${
                   col.align === 'right' ? 'text-right' : 'text-left'
                 }`}
@@ -123,12 +131,12 @@ export default function HoldingsTable({ holdings, totalValue }: HoldingsTablePro
               <td className="px-3 py-2 text-gray-700 max-w-[160px] truncate">{h.name || '—'}</td>
               <td className="px-3 py-2 text-gray-500 max-w-[120px] truncate">{h.sector || 'Other'}</td>
               <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmt(h.allocation_pct)}%</td>
-              <td className="px-3 py-2 text-right tabular-nums text-gray-900">{fmtMoney(h.current_price)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtMoney(h.avg_cost)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-gray-900">{fmtMoney(h.current_price, h.currency || currency)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtMoney(h.avg_cost, h.currency || currency)}</td>
               <td className={`px-3 py-2 text-right tabular-nums ${gainColor(h.day_gain_pct)}`}>{fmtPct(h.day_gain_pct)}</td>
               <td className={`px-3 py-2 text-right tabular-nums ${gainColor(h.unrealised_gain_pct)}`}>{fmtPct(h.unrealised_gain_pct)}</td>
-              <td className={`px-3 py-2 text-right tabular-nums ${gainColor(h.unrealised_gain)}`}>{fmtMoney(h.unrealised_gain)}</td>
-              <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">{fmtMoney(h.market_value)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums ${gainColor(h.unrealised_gain)}`}>{fmtMoney(h.unrealised_gain, h.currency || currency)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">{fmtMoney(h.market_value, h.currency || currency)}</td>
               <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtShares(h.quantity)}</td>
             </tr>
           ))}
@@ -145,8 +153,8 @@ export default function HoldingsTable({ holdings, totalValue }: HoldingsTablePro
             <td className="px-3 py-2.5" />
             <td className="px-3 py-2.5" />
             <td className={`px-3 py-2.5 text-right tabular-nums ${gainColor(totalGainPct)}`}>{fmtPct(totalGainPct)}</td>
-            <td className={`px-3 py-2.5 text-right tabular-nums ${gainColor(totals.unrealised_gain)}`}>{fmtMoney(totals.unrealised_gain)}</td>
-            <td className="px-3 py-2.5 text-right tabular-nums text-gray-900">{fmtMoney(totalMV)}</td>
+            <td className={`px-3 py-2.5 text-right tabular-nums ${gainColor(totals.unrealised_gain)}`}>{fmtMoney(totals.unrealised_gain, currency)}</td>
+            <td className="px-3 py-2.5 text-right tabular-nums text-gray-900">{fmtMoney(totalMV, currency)}</td>
             <td className="px-3 py-2.5" />
           </tr>
         </tfoot>

@@ -8,8 +8,7 @@ export async function GET(request: NextRequest) {
     if (account === 'all') {
       const aggregate = await getAggregateValue();
       const holdings = await getHoldings();
-      const [pnl, allTimePnl] = await Promise.all([getDailyPnL(), getAllTimePnL()]);
-      const totalDeposited = getTotalDeposited();
+      const [pnl, allTimePnl, totalDeposited] = await Promise.all([getDailyPnL(), getAllTimePnL(), getTotalDeposited()]);
       return NextResponse.json({
         data: {
           ...aggregate,
@@ -22,13 +21,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Per-account view
-    const [portfolioValue, holdings, pnl, allTimePnl] = await Promise.all([
+    const [portfolioValue, holdings, pnl, allTimePnl, totalDeposited] = await Promise.all([
       getPortfolioValue(account),
       getHoldings(account),
       getDailyPnL(account),
       getAllTimePnL(account),
+      getTotalDeposited(account),
     ]);
-    const totalDeposited = getTotalDeposited(account);
 
     return NextResponse.json({
       data: {

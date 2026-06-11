@@ -14,7 +14,7 @@ import {
 
 interface HistoricalReturn {
   period: string;
-  return_pct: number;
+  return_pct: number | null;
 }
 
 interface HistoricalReturnChartProps {
@@ -29,8 +29,8 @@ const GRANULARITIES = [
   { key: 'annually' as const, label: 'Annually' },
 ];
 
-function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
-  if (!active || !payload || !payload[0]) return null;
+function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number | null }>; label?: string }) {
+  if (!active || !payload || !payload[0] || payload[0].value == null) return null;
   const value = payload[0].value;
   const color = value >= 0 ? '#16a34a' : '#dc2626';
   const sign = value >= 0 ? '+' : '';
@@ -90,7 +90,7 @@ export default function HistoricalReturnChart({ data, onGranularityChange, granu
               {data.map((entry, index) => (
                 <Cell
                   key={index}
-                  fill={entry.return_pct >= 0 ? '#16a34a' : '#dc2626'}
+                  fill={(entry.return_pct ?? 0) >= 0 ? '#16a34a' : '#dc2626'}
                   fillOpacity={0.85}
                 />
               ))}

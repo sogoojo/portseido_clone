@@ -201,6 +201,7 @@ export interface WatchlistRow extends WatchlistItem {
   thesis: ThesisState;             // from next-year EPS revision momentum
   analyst_upside: number | null;   // (consensus target - price) / price, if covered
   recommendation_key: string | null;
+  ytd_change: number | null;       // (price - prior-year close) / prior-year close (NGX rows)
   stale: boolean;
 }
 

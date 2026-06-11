@@ -48,8 +48,20 @@ export async function POST(request: NextRequest) {
     const insert = db.prepare(
       `INSERT INTO transactions (account_id, date, type, ticker, quantity, price_per_unit, amount, currency, commission, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    // Re-uploading the same CSV must not double every holding — skip rows
+    // that already exist with identical economics
+    const findDuplicate = db.prepare(
+      `SELECT id FROM transactions
+       WHERE account_id = ? AND date = ? AND type = ?
+         AND COALESCE(ticker, '') = COALESCE(?, '')
+         AND COALESCE(quantity, -1) = COALESCE(?, -1)
+         AND COALESCE(price_per_unit, -1) = COALESCE(?, -1)
+         AND COALESCE(amount, -1) = COALESCE(?, -1)
+       LIMIT 1`
+    );
 
     let imported = 0;
+    let skipped = 0;
     const importAll = db.transaction(() => {
       for (const t of transactions) {
         if (!t.date || !t.type) continue;
@@ -59,6 +71,15 @@ export async function POST(request: NextRequest) {
         if (!validTypes.includes(type)) continue;
 
         const computedAmount = t.amount ?? (t.quantity && t.price_per_unit ? t.quantity * t.price_per_unit : null);
+
+        const dup = findDuplicate.get(
+          account_id, t.date, type,
+          t.ticker || null, t.quantity || null, t.price_per_unit || null, computedAmount
+        );
+        if (dup) {
+          skipped++;
+          continue;
+        }
 
         insert.run(
           account_id,
@@ -78,7 +99,7 @@ export async function POST(request: NextRequest) {
 
     importAll();
 
-    return NextResponse.json({ data: { imported } });
+    return NextResponse.json({ data: { imported, skipped } });
   } catch (err) {
     return NextResponse.json({ error: 'server', message: (err as Error).message }, { status: 500 });
   }

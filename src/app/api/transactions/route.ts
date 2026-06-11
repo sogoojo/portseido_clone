@@ -4,6 +4,41 @@ import type { Transaction, TransactionType } from '@/lib/types';
 
 const VALID_TYPES: TransactionType[] = ['buy', 'sell', 'deposit', 'withdrawal', 'dividend'];
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function safeInt(raw: string | null, fallback: number): number {
+  const n = parseInt(raw || '', 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// Shared validation for POST and PUT — both write a full transaction row
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function validateTransactionBody(body: any): string | null {
+  const { account_id, date, type, ticker, quantity, price_per_unit, amount } = body;
+
+  if (!account_id || !date || !type || !body.currency) {
+    return 'Missing required fields: account_id, date, type, currency';
+  }
+  if (!VALID_TYPES.includes(type)) {
+    return `Invalid type. Must be one of: ${VALID_TYPES.join(', ')}`;
+  }
+  if (typeof date !== 'string' || !ISO_DATE.test(date)) {
+    return 'date must be in YYYY-MM-DD format';
+  }
+  if ((type === 'buy' || type === 'sell') && (!ticker || !quantity || !price_per_unit)) {
+    return 'Buy/sell transactions require ticker, quantity, and price_per_unit';
+  }
+  if ((type === 'deposit' || type === 'withdrawal') && !amount) {
+    return 'Deposit/withdrawal transactions require amount';
+  }
+  for (const [field, value] of [['quantity', quantity], ['price_per_unit', price_per_unit], ['amount', amount], ['commission', body.commission]] as const) {
+    if (value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+      return `${field} must be a non-negative number`;
+    }
+  }
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
   const params = request.nextUrl.searchParams;
@@ -14,8 +49,8 @@ export async function GET(request: NextRequest) {
   const date_to = params.get('date_to');
   const sort_by = params.get('sort_by') || 'date';
   const sort_dir = params.get('sort_dir') === 'asc' ? 'ASC' : 'DESC';
-  const page = Math.max(1, parseInt(params.get('page') || '1', 10));
-  const limit = Math.max(1, Math.min(200, parseInt(params.get('limit') || '50', 10)));
+  const page = Math.max(1, safeInt(params.get('page'), 1));
+  const limit = Math.max(1, Math.min(200, safeInt(params.get('limit'), 50)));
   const offset = (page - 1) * limit;
 
   const conditions: string[] = [];
@@ -76,17 +111,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { account_id, date, type, ticker, quantity, price_per_unit, amount, currency, commission, notes } = body;
 
-    if (!account_id || !date || !type || !currency) {
-      return NextResponse.json({ error: 'validation', message: 'Missing required fields: account_id, date, type, currency' }, { status: 400 });
-    }
-    if (!VALID_TYPES.includes(type)) {
-      return NextResponse.json({ error: 'validation', message: `Invalid type. Must be one of: ${VALID_TYPES.join(', ')}` }, { status: 400 });
-    }
-    if ((type === 'buy' || type === 'sell') && (!ticker || !quantity || !price_per_unit)) {
-      return NextResponse.json({ error: 'validation', message: 'Buy/sell transactions require ticker, quantity, and price_per_unit' }, { status: 400 });
-    }
-    if ((type === 'deposit' || type === 'withdrawal') && !amount) {
-      return NextResponse.json({ error: 'validation', message: 'Deposit/withdrawal transactions require amount' }, { status: 400 });
+    const validationError = validateTransactionBody(body);
+    if (validationError) {
+      return NextResponse.json({ error: 'validation', message: validationError }, { status: 400 });
     }
 
     const computedAmount = amount ?? (quantity && price_per_unit ? quantity * price_per_unit : null);
@@ -116,6 +143,13 @@ export async function PUT(request: NextRequest) {
     const existing = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
     if (!existing) {
       return NextResponse.json({ error: 'not_found', message: 'Transaction not found' }, { status: 404 });
+    }
+
+    // PUT is full-replace: validate exactly like POST so an update cannot
+    // write a row that downstream FIFO/cash calculations silently ignore
+    const validationError = validateTransactionBody(body);
+    if (validationError) {
+      return NextResponse.json({ error: 'validation', message: validationError }, { status: 400 });
     }
 
     const computedAmount = amount ?? (quantity && price_per_unit ? quantity * price_per_unit : null);

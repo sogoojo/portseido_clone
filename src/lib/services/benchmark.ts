@@ -1,6 +1,6 @@
 import db from '@/lib/db';
 import { getHistoricalPrices, getCurrentPrice } from '@/lib/services/prices';
-import { convert } from '@/lib/services/fx';
+import { convert, getHistoricalRate } from '@/lib/services/fx';
 import type { Transaction } from '@/lib/types';
 
 export interface CounterfactualResult {
@@ -40,8 +40,10 @@ export async function calculateCounterfactual(accountId?: string): Promise<Count
     };
   }
 
-  // Get SPY historical prices for all deposit dates
+  // Get SPY historical prices for all deposit dates — start a week early so
+  // a first deposit on a weekend/holiday still finds a prior trading day
   const firstDate = new Date(cashFlows[0].date);
+  firstDate.setDate(firstDate.getDate() - 7);
   const today = new Date();
   const spyHistory = await getHistoricalPrices('SPY', firstDate, today);
 
@@ -72,8 +74,11 @@ export async function calculateCounterfactual(accountId?: string): Promise<Count
   for (const cf of cashFlows) {
     if (!cf.amount) continue;
 
-    // Convert to USD for SPY calculation
-    const amountUsd = await convert(cf.amount, cf.currency || cf.account_currency, 'USD');
+    // Convert at the FX rate of the deposit date — converting a years-old
+    // deposit at today's rate buys the wrong number of historical SPY shares
+    const ccy = (cf.currency || cf.account_currency).toUpperCase();
+    const rate = ccy === 'USD' ? 1 : await getHistoricalRate(ccy, 'USD', cf.date);
+    const amountUsd = cf.amount * rate;
     const spyPrice = findSpyPrice(cf.date);
 
     if (!spyPrice) continue;

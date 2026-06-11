@@ -1,4 +1,4 @@
-import type { ParsedTransaction } from './index';
+import { parseCsv, parseLocaleNumber, type ParsedTransaction } from './index';
 
 // ISIN → Yahoo Finance ticker mapping
 const ISIN_TO_TICKER: Record<string, string> = {
@@ -37,26 +37,6 @@ const ISIN_TO_TICKER: Record<string, string> = {
   'NL0000235190': 'AIR.PA',
 };
 
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  result.push(current.trim());
-  return result;
-}
-
 // Convert DD-MM-YYYY to YYYY-MM-DD
 function parseDate(raw: string): string {
   const parts = raw.split('-');
@@ -67,11 +47,12 @@ function parseDate(raw: string): string {
 
 const degiroParser = {
   parse(csvContent: string): ParsedTransaction[] {
-    const lines = csvContent.split('\n');
-    if (lines.length < 2) return [];
+    // Record-level parse: product names can contain commas AND newlines
+    const records = parseCsv(csvContent);
+    if (records.length < 2) return [];
 
     // Verify header
-    const header = lines[0];
+    const header = records[0].join(',');
     if (!header.includes('Product') || !header.includes('ISIN')) {
       return []; // Not a Degiro CSV
     }
@@ -88,34 +69,30 @@ const degiroParser = {
       QUANTITY: 6,
       PRICE: 7,
       PRICE_CURRENCY: 8,
+      FX_RATE: 12,
       AUTO_FX_FEE: 13,
       TX_FEE: 14,
       TOTAL_EUR: 15,
+      ORDER_ID: 16,
     };
 
     const transactions: ParsedTransaction[] = [];
 
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      const vals = parseCsvLine(line);
+    for (let i = 1; i < records.length; i++) {
+      const vals = records[i];
       const dateRaw = vals[COL.DATE];
 
-      // Skip continuation lines (multi-line product names)
-      if (!dateRaw || dateRaw === '') continue;
+      // Skip rows without a valid date pattern
+      if (!dateRaw || !/^\d{2}-\d{2}-\d{4}$/.test(dateRaw)) continue;
 
-      // Skip if no valid date pattern
-      if (!/^\d{2}-\d{2}-\d{4}$/.test(dateRaw)) continue;
-
-      const quantity = parseFloat(vals[COL.QUANTITY]);
+      const quantity = parseLocaleNumber(vals[COL.QUANTITY]);
       if (!quantity || !isFinite(quantity)) continue;
 
-      const price = parseFloat(vals[COL.PRICE]);
+      const price = parseLocaleNumber(vals[COL.PRICE]);
       if (!isFinite(price)) continue;
 
-      // Skip zero-price rows (corporate actions like warrant distributions)
-      if (price === 0 && Math.abs(quantity) <= 1) continue;
+      // Skip zero-price rows (corporate actions like warrant/share distributions)
+      if (price === 0) continue;
 
       const isin = vals[COL.ISIN] || '';
       const product = vals[COL.PRODUCT] || '';
@@ -128,12 +105,22 @@ const degiroParser = {
       const type: 'buy' | 'sell' = quantity > 0 ? 'buy' : 'sell';
       const absQuantity = Math.abs(quantity);
 
-      // Commission = |AutoFX Fee| + |Transaction fees|
-      const autoFx = Math.abs(parseFloat(vals[COL.AUTO_FX_FEE]) || 0);
-      const txFee = Math.abs(parseFloat(vals[COL.TX_FEE]) || 0);
-      const commission = autoFx + txFee;
+      // Commission = |AutoFX Fee| + |Transaction fees| — these columns are
+      // EUR in Degiro exports. The row's currency is the PRICE currency, so
+      // for non-EUR trades convert the fee using the row's own exchange rate
+      // (quoted as price-currency per EUR).
+      const autoFx = Math.abs(parseLocaleNumber(vals[COL.AUTO_FX_FEE]) || 0);
+      const txFee = Math.abs(parseLocaleNumber(vals[COL.TX_FEE]) || 0);
+      let commission = autoFx + txFee;
+      if (currency !== 'EUR' && commission > 0) {
+        const fxRate = parseLocaleNumber(vals[COL.FX_RATE]);
+        if (isFinite(fxRate) && fxRate > 0) {
+          commission = commission * fxRate;
+        }
+      }
 
       const amount = absQuantity * price;
+      const orderId = vals[COL.ORDER_ID] || '';
 
       transactions.push({
         date: parseDate(dateRaw),
@@ -144,7 +131,8 @@ const degiroParser = {
         amount,
         currency,
         commission,
-        notes: product,
+        // Order ID makes re-imports detectable
+        notes: orderId ? `${product} [${orderId}]` : product,
       });
     }
 

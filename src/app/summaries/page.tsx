@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import type { DailySummary, NewsArticle } from '@/lib/types';
 import SentimentTrends from '@/components/summaries/SentimentTrends';
+import { useApi } from '@/lib/hooks';
 
 type Sentiment = 'negative' | 'neutral' | 'positive' | 'none';
 
@@ -273,13 +274,10 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
 }
 
 export default function SummariesPage() {
-  const [summaries, setSummaries] = useState<DailySummary[]>([]);
-  const [loading, setLoading] = useState(true);
   const [ticker, setTicker] = useState('');
   const [date, setDate] = useState('');
 
-  useEffect(() => {
-    setLoading(true);
+  const url = useMemo(() => {
     const params = new URLSearchParams();
     if (ticker) params.set('ticker', ticker);
     if (date) {
@@ -288,16 +286,15 @@ export default function SummariesPage() {
     } else {
       params.set('latest', 'true');
     }
-
-    fetch(`/api/summaries?${params}`)
-      .then(r => r.json())
-      .then(json => {
-        const data = json.data;
-        setSummaries(Array.isArray(data) ? data : data ? [data] : []);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    return `/api/summaries?${params}`;
   }, [ticker, date]);
+
+  // Debounce while typing in the ticker filter; aborts stale requests
+  const { data: body, loading } = useApi<{ data: DailySummary[] | DailySummary }>(url, ticker ? 300 : 0);
+  const summaries = useMemo(() => {
+    const data = body?.data;
+    return Array.isArray(data) ? data : data ? [data] : [];
+  }, [body]);
 
   const scored = useMemo(() => {
     return summaries
@@ -312,7 +309,8 @@ export default function SummariesPage() {
     if (summaries.length === 0) return null;
     const latest = summaries.reduce((max, s) =>
       s.fetched_at > max ? s.fetched_at : max, summaries[0].fetched_at);
-    return new Date(latest + 'Z');
+    // SQLite "YYYY-MM-DD HH:MM:SS" is not ISO — Safari rejects it without the T
+    return new Date(latest.replace(' ', 'T') + 'Z');
   }, [summaries]);
 
   return (

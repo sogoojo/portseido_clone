@@ -24,6 +24,8 @@ export function deleteTarget(ticker: string): void {
 
 const TIER_PRIORITY: Record<number, string> = { 1: 'High', 2: 'Medium', 3: 'Low' };
 
+const tickerNameStmt = db.prepare('SELECT name FROM ticker_metadata WHERE ticker = ?');
+
 function classify(gap: number | null): RebalanceStatus {
   if (gap == null) return 'untracked';
   if (gap > 0.5) return 'underweight';
@@ -72,8 +74,7 @@ export async function computeRebalance(): Promise<RebalanceResult> {
       }
     }
 
-    const meta = db.prepare('SELECT name FROM ticker_metadata WHERE ticker = ?')
-      .get(ticker) as { name: string | null } | undefined;
+    const meta = tickerNameStmt.get(ticker) as { name: string | null } | undefined;
 
     rows.push({
       ticker, name: meta?.name ?? null, tier,

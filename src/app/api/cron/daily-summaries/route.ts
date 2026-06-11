@@ -24,6 +24,16 @@ export async function POST(request: NextRequest) {
       );
     }
     const result = await runDailySummaries(dateParam || undefined);
+    // Zero successes with tickers to process means the whole run failed
+    // (Yahoo down, or a delayed cron tripping the freshness guard on every
+    // ticker) — return 5xx so the GitHub Action goes red instead of silently
+    // leaving a missing day
+    if (result.total > 0 && result.success === 0) {
+      return NextResponse.json(
+        { error: 'empty_run', message: `0/${result.total} tickers summarised for ${result.date}`, data: result },
+        { status: 502 }
+      );
+    }
     return NextResponse.json({ data: result });
   } catch (err) {
     console.error('[Cron/daily-summaries] Error:', err);

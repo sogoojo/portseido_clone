@@ -291,7 +291,7 @@ export default function SentimentTrends() {
     setLoading(true);
     const days = PERIODS.find(p => p.key === period)!.days;
     const from = getFromDate(days);
-    fetch(`/api/summaries?from=${from}&limit=200`)
+    fetch(`/api/summaries?from=${from}&limit=20000`)
       .then(r => r.json())
       .then(json => {
         setSummaries(Array.isArray(json.data) ? json.data : []);

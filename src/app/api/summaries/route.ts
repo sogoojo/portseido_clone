@@ -8,8 +8,12 @@ export async function GET(request: NextRequest) {
     const from = params.get('from');
     const to = params.get('to');
     const latest = params.get('latest');
-    const limit = Math.max(1, Math.min(200, parseInt(params.get('limit') || '50', 10)));
-    const page = Math.max(1, parseInt(params.get('page') || '1', 10));
+    // High cap: trend views need a full window of (tickers × days) rows —
+    // capping at 200 silently truncated 3M/1Y trends to a few days of data
+    const limitRaw = parseInt(params.get('limit') || '50', 10);
+    const limit = Math.max(1, Math.min(20000, Number.isFinite(limitRaw) ? limitRaw : 50));
+    const pageRaw = parseInt(params.get('page') || '1', 10);
+    const page = Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1);
 
     if (ticker && from && !to && latest !== 'true') {
       const summary = getSummaryForDate(ticker, from);

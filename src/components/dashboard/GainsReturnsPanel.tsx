@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useApi } from '@/lib/hooks';
 
 interface PeriodReturn {
   period: string;
-  mwr: number;
+  mwr: number | null;
 }
 
 interface GainsReturnsPanelProps {
@@ -21,19 +21,10 @@ const DISPLAY_PERIODS = [
 ];
 
 export default function GainsReturnsPanel({ account }: GainsReturnsPanelProps) {
-  const [returns, setReturns] = useState<PeriodReturn[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/performance?account=${account}`)
-      .then(r => r.json())
-      .then(json => {
-        if (json.data?.portfolio) setReturns(json.data.portfolio);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account]);
+  const { data: body, loading } = useApi<{ data: { portfolio: PeriodReturn[] } }>(
+    `/api/performance?account=${account}`
+  );
+  const returns = body?.data?.portfolio || [];
 
   if (loading) {
     return (

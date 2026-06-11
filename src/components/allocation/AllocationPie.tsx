@@ -17,16 +17,18 @@ type GroupMode = 'holding' | 'sector';
 interface AllocationPieProps {
   holdings: PortfolioHolding[];
   cashBalance: number;
+  currency?: string;
   defaultGroupMode?: GroupMode;
   title?: string;
 }
 
-function formatMoney(value: number): string {
+function formatMoney(value: number, currency?: string): string {
+  const sym = currency === 'EUR' ? '€' : currency === 'NGN' ? '₦' : '$';
   const sign = value >= 0 ? '' : '-';
   const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
-  return `${sign}$${abs.toFixed(2)}`;
+  if (abs >= 1_000_000) return `${sign}${sym}${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}${sym}${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}${sym}${abs.toFixed(2)}`;
 }
 
 function normalizeSector(holding: PortfolioHolding): string {
@@ -36,36 +38,128 @@ function normalizeSector(holding: PortfolioHolding): string {
   return 'Other';
 }
 
-function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { pct: number } }> }) {
+function CustomTooltip({ active, payload, currency }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { pct: number } }>; currency?: string }) {
   if (!active || !payload || !payload[0]) return null;
   const { name, value, payload: data } = payload[0];
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-sm">
       <p className="font-medium text-gray-900">{name}</p>
-      <p className="tabular-nums text-gray-700">{formatMoney(value)}</p>
+      <p className="tabular-nums text-gray-700">{formatMoney(value, currency)}</p>
       <p className="tabular-nums text-gray-500">{data.pct.toFixed(1)}%</p>
     </div>
   );
 }
 
 const RADIAN = Math.PI / 180;
+
+// Chart geometry — labels are laid out against these constants, so they and
+// the <Pie> props must stay in sync
+const CHART_HEIGHT = 420;
+const CHART_CY = CHART_HEIGHT / 2;
+const INNER_RADIUS = 82;
+const OUTER_RADIUS = 116;
+const LABEL_RING = OUTER_RADIUS + 24; // labels live on this ring outside the donut
+const LABEL_MIN_PCT = 0.8; // label almost every slice, like Portseido
+const LABEL_SPACING = 15; // min vertical px between labels on one side
+
+interface PieDatum {
+  name: string;
+  value: number;
+  pct: number;
+  labelY?: number;
+  labelDX?: number; // horizontal offset of the label anchor from the centre
+}
+
+/**
+ * Portseido-style label layout. Slices run clockwise from 12 o'clock, so
+ * each side of the donut is already in top-to-bottom order:
+ *  1. place each label at its slice's angle on a ring outside the donut,
+ *  2. push labels apart vertically to enforce minimum spacing,
+ *  3. derive the label's x from its FINAL y along that same ring —
+ *     so labels follow the donut's contour and leader lines stay short and
+ *     never slash across neighbouring labels.
+ */
+function layoutLabels(items: PieDatum[]): void {
+  const total = items.reduce((s, i) => s + Math.max(0, i.value), 0);
+  if (total <= 0) return;
+
+  let cum = 0;
+  const positioned = items.map(item => {
+    const midDeg = 90 - ((cum + item.value / 2) / total) * 360; // startAngle 90, clockwise
+    cum += item.value;
+    const rad = -midDeg * RADIAN;
+    return { item, cos: Math.cos(rad), idealY: CHART_CY + LABEL_RING * Math.sin(rad) };
+  }).filter(p => p.item.pct >= LABEL_MIN_PCT);
+
+  const rightSide = positioned.filter(p => p.cos >= 0);
+  const leftSide = positioned.filter(p => p.cos < 0).reverse(); // make it top→bottom too
+
+  for (const side of [rightSide, leftSide]) {
+    // top-down: enforce spacing
+    let prevY = -Infinity;
+    for (const p of side) {
+      p.item.labelY = Math.max(p.idealY, prevY + LABEL_SPACING);
+      prevY = p.item.labelY;
+    }
+    // bottom-up: keep everything inside the chart
+    let maxY = CHART_HEIGHT - 10;
+    for (let i = side.length - 1; i >= 0; i--) {
+      side[i].item.labelY = Math.min(side[i].item.labelY!, maxY);
+      maxY = side[i].item.labelY! - LABEL_SPACING;
+    }
+    // x from final y, walking the label ring
+    const dir = side === rightSide ? 1 : -1;
+    for (const p of side) {
+      const dy = p.item.labelY! - CHART_CY;
+      const dx = Math.max(Math.sqrt(Math.max(LABEL_RING * LABEL_RING - dy * dy, 0)), 16);
+      p.item.labelDX = dir * dx;
+    }
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderLabel(props: any) {
-  const { cx, cy, midAngle, innerRadius, outerRadius, pct, name } = props as {
-    cx: number; cy: number; midAngle: number; innerRadius: number; outerRadius: number; pct: number; name: string;
+  const { cx, cy, midAngle, pct, name, labelY, labelDX } = props as {
+    cx: number; cy: number; midAngle: number; pct: number; name: string;
+    labelY?: number; labelDX?: number;
   };
-  if (pct < 4) return null;
-  const radius = innerRadius + (outerRadius - innerRadius) * 1.4;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  if (labelY == null || labelDX == null) return null;
+
+  const rad = -midAngle * RADIAN;
+  const isRight = labelDX >= 0;
+
+  // leader line: slice edge → elbow just before the label → label anchor
+  const sx = cx + OUTER_RADIUS * Math.cos(rad);
+  const sy = cy + OUTER_RADIUS * Math.sin(rad);
+  const lx = cx + labelDX;
+  const elbowX = lx - (isRight ? 6 : -6);
+
+  const label = `${name.length > 12 ? name.slice(0, 12) + '…' : name}: ${pct.toFixed(1)}%`;
+
   return (
-    <text x={x} y={y} fill="#374151" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={11} fontWeight={500}>
-      {name.length > 10 ? name.slice(0, 10) + '…' : name} {pct.toFixed(0)}%
-    </text>
+    <g>
+      <polyline
+        points={`${sx},${sy} ${elbowX},${labelY} ${lx},${labelY}`}
+        stroke="#9ca3af"
+        strokeWidth={1}
+        fill="none"
+      />
+      <text
+        x={lx + (isRight ? 4 : -4)}
+        y={labelY}
+        textAnchor={isRight ? 'start' : 'end'}
+        dominantBaseline="central"
+        fontSize={10.5}
+        fontWeight={600}
+        fill="#374151"
+      >
+        {label}
+      </text>
+    </g>
   );
 }
 
-export default function AllocationPie({ holdings, cashBalance, defaultGroupMode = 'holding', title }: AllocationPieProps) {
+export default function AllocationPie({ holdings, cashBalance, currency, defaultGroupMode = 'holding', title }: AllocationPieProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('market_value');
   const [groupMode, setGroupMode] = useState<GroupMode>(defaultGroupMode);
   const [hoveredIndex, setHoveredIndex] = useState<number | undefined>(undefined);
@@ -77,7 +171,7 @@ export default function AllocationPie({ holdings, cashBalance, defaultGroupMode 
     { key: 'loss', label: 'Loss' },
   ];
 
-  function buildPieData() {
+  function buildPieData(): PieDatum[] {
     let items: { name: string; value: number }[] = [];
 
     if (groupMode === 'holding') {
@@ -111,13 +205,14 @@ export default function AllocationPie({ holdings, cashBalance, defaultGroupMode 
       items.push({ name: 'Cash', value: cashBalance });
     }
 
-    return items
+    const total = items.reduce((s, x) => s + Math.max(0, x.value), 0);
+    const data: PieDatum[] = items
       .filter(i => i.value > 0.01)
       .sort((a, b) => b.value - a.value)
-      .map(i => {
-        const total = items.reduce((s, x) => s + Math.max(0, x.value), 0);
-        return { ...i, pct: total > 0 ? (i.value / total) * 100 : 0 };
-      });
+      .map(i => ({ ...i, pct: total > 0 ? (i.value / total) * 100 : 0 }));
+
+    layoutLabels(data);
+    return data;
   }
 
   const pieData = buildPieData();
@@ -159,18 +254,21 @@ export default function AllocationPie({ holdings, cashBalance, defaultGroupMode 
         </div>
       ) : (
         <div className="relative">
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
             <PieChart>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
-                innerRadius={80}
-                outerRadius={115}
-                paddingAngle={2}
+                startAngle={90}
+                endAngle={-270}
+                innerRadius={INNER_RADIUS}
+                outerRadius={OUTER_RADIUS}
+                paddingAngle={1.5}
                 dataKey="value"
                 nameKey="name"
                 label={renderLabel}
+                labelLine={false}
                 strokeWidth={0}
                 onMouseLeave={() => setHoveredIndex(undefined)}
               >
@@ -184,7 +282,7 @@ export default function AllocationPie({ holdings, cashBalance, defaultGroupMode 
                   />
                 ))}
               </Pie>
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<CustomTooltip currency={currency} />} />
             </PieChart>
           </ResponsiveContainer>
           {/* Center label */}
@@ -193,13 +291,13 @@ export default function AllocationPie({ holdings, cashBalance, defaultGroupMode 
               {hoveredItem ? (
                 <>
                   <p className="text-xs text-gray-400 truncate max-w-[100px]">{hoveredItem.name}</p>
-                  <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(hoveredItem.value)}</p>
+                  <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(hoveredItem.value, currency)}</p>
                   <p className="text-xs tabular-nums text-gray-500">{hoveredItem.pct.toFixed(1)}%</p>
                 </>
               ) : (
                 <>
                   <p className="text-xs text-gray-400 uppercase">Total</p>
-                  <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(totalValue)}</p>
+                  <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(totalValue, currency)}</p>
                 </>
               )}
             </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Transaction, TransactionType } from '@/lib/types';
 
@@ -54,8 +54,19 @@ export default function TransactionTable({ onEdit, onDelete, refreshKey }: Trans
   const [filterDateTo, setFilterDateTo] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  const fetchTransactions = useCallback(async () => {
+  // Reset to page 1 synchronously when a filter changes — a separate effect
+  // fired a second fetch with the stale page and could lose the race
+  const filterKey = `${globalAccount}|${filterTypes.join(',')}|${filterTicker}|${filterDateFrom}|${filterDateTo}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    if (page !== 1) setPage(1);
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
+
     const params = new URLSearchParams();
     if (globalAccount !== 'all') params.set('account_id', globalAccount);
     if (filterTypes.length > 0) params.set('type', filterTypes.join(','));
@@ -67,28 +78,22 @@ export default function TransactionTable({ onEdit, onDelete, refreshKey }: Trans
     params.set('sort_by', sortBy);
     params.set('sort_dir', sortDir);
 
-    try {
-      const res = await fetch(`/api/transactions?${params.toString()}`);
-      const json = await res.json();
-      if (json.data) {
-        setTransactions(json.data);
-        setTotal(json.total);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, [globalAccount, filterTypes, filterTicker, filterDateFrom, filterDateTo, page, limit, sortBy, sortDir]);
+    fetch(`/api/transactions?${params.toString()}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(json => {
+        if (json.data) {
+          setTransactions(json.data);
+          setTotal(json.total);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
 
-  useEffect(() => {
-    fetchTransactions();
-  }, [fetchTransactions, refreshKey]);
-
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [globalAccount, filterTypes, filterTicker, filterDateFrom, filterDateTo]);
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, page, limit, sortBy, sortDir, refreshKey]);
 
   function handleSort(col: string) {
     if (sortBy === col) {
@@ -193,9 +198,12 @@ export default function TransactionTable({ onEdit, onDelete, refreshKey }: Trans
           <button
             onClick={handleExportCsv}
             disabled={transactions.length === 0}
+            title={total > transactions.length
+              ? `Exports only the ${transactions.length} rows on this page (${total} match the filters)`
+              : 'Export the filtered transactions'}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            Export CSV
+            Export CSV{total > transactions.length ? ' (page)' : ''}
           </button>
         </div>
       </div>
@@ -208,7 +216,11 @@ export default function TransactionTable({ onEdit, onDelete, refreshKey }: Trans
               {SORTABLE_COLUMNS.map((col) => (
                 <th
                   key={col.key}
+                  scope="col"
+                  tabIndex={0}
                   onClick={() => handleSort(col.key)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort(col.key); } }}
+                  aria-sort={sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                   className="cursor-pointer select-none px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:text-gray-700"
                 >
                   {col.label}

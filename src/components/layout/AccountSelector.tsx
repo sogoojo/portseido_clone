@@ -1,25 +1,15 @@
 'use client';
 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import type { Account } from '@/lib/types';
+import { useAccounts } from '@/lib/hooks';
 
 export default function AccountSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const accounts = useAccounts();
 
   const selected = searchParams.get('account') || 'all';
-
-  useEffect(() => {
-    fetch('/api/accounts')
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.data) setAccounts(json.data);
-      })
-      .catch(() => {});
-  }, []);
 
   function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;

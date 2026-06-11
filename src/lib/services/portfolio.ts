@@ -18,7 +18,7 @@ interface FIFOResult {
   realised_gain: number;
 }
 
-export function computeFIFO(transactions: Pick<Transaction, 'date' | 'type' | 'quantity' | 'price_per_unit'>[]): FIFOResult {
+export function computeFIFO(transactions: (Pick<Transaction, 'date' | 'type' | 'quantity' | 'price_per_unit'> & { commission?: number | null })[]): FIFOResult {
   const lots: Lot[] = [];
   let realisedGain = 0;
 
@@ -33,7 +33,9 @@ export function computeFIFO(transactions: Pick<Transaction, 'date' | 'type' | 'q
 
   for (const tx of sorted) {
     if (tx.type === 'buy' && tx.quantity && tx.price_per_unit) {
-      lots.push({ date: tx.date, remaining_qty: tx.quantity, price: tx.price_per_unit });
+      // Buy commission is part of the lot's cost basis
+      const unitCost = tx.price_per_unit + (tx.commission || 0) / tx.quantity;
+      lots.push({ date: tx.date, remaining_qty: tx.quantity, price: unitCost });
     } else if (tx.type === 'sell' && tx.quantity && tx.price_per_unit) {
       let toSell = tx.quantity;
       for (const lot of lots) {
@@ -45,6 +47,8 @@ export function computeFIFO(transactions: Pick<Transaction, 'date' | 'type' | 'q
         lot.remaining_qty -= consume;
         toSell -= consume;
       }
+      // Sell commission reduces the realised gain
+      realisedGain -= tx.commission || 0;
       if (toSell > 0.0001) {
         console.warn(`[FIFO] Sell exceeds holdings by ${toSell.toFixed(4)} units`);
       }
@@ -67,6 +71,18 @@ export function computeFIFO(transactions: Pick<Transaction, 'date' | 'type' | 'q
 
 // --- Holdings ---
 
+// Hoisted prepared statements (better-sqlite3 does not cache db.prepare calls)
+const tickerMetaStmt = db.prepare('SELECT name, sector, industry, asset_type, market FROM ticker_metadata WHERE ticker = ?');
+const tickerTxsStmt = db.prepare(
+  `SELECT date, type, quantity, price_per_unit, commission
+   FROM transactions
+   WHERE ticker = ? AND account_id = ? AND type IN ('buy', 'sell')
+   ORDER BY date`
+);
+const tradeCcyStmt = db.prepare(
+  `SELECT currency FROM transactions WHERE ticker = ? AND account_id = ? AND type = 'buy' LIMIT 1`
+);
+
 export async function getHoldings(accountId?: string): Promise<PortfolioHolding[]> {
   const condition = accountId && accountId !== 'all' ? 'AND t.account_id = ?' : '';
   const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
@@ -86,19 +102,12 @@ export async function getHoldings(accountId?: string): Promise<PortfolioHolding[
   const held: HeldPosition[] = [];
 
   for (const { ticker, account_id, account_currency } of tickers) {
-    const txs = db.prepare(
-      `SELECT date, type, quantity, price_per_unit
-       FROM transactions
-       WHERE ticker = ? AND account_id = ? AND type IN ('buy', 'sell')
-       ORDER BY date`
-    ).all(ticker, account_id) as Pick<Transaction, 'date' | 'type' | 'quantity' | 'price_per_unit'>[];
+    const txs = tickerTxsStmt.all(ticker, account_id) as Pick<Transaction, 'date' | 'type' | 'quantity' | 'price_per_unit' | 'commission'>[];
 
     const fifo = computeFIFO(txs);
     if (fifo.quantity <= 0.0001) continue;
 
-    const tradeCcy = (db.prepare(
-      `SELECT currency FROM transactions WHERE ticker = ? AND account_id = ? AND type = 'buy' LIMIT 1`
-    ).get(ticker, account_id) as { currency: string } | undefined)?.currency || account_currency;
+    const tradeCcy = (tradeCcyStmt.get(ticker, account_id) as { currency: string } | undefined)?.currency || account_currency;
 
     held.push({ ticker, account_id, account_currency, tradeCcy, fifo });
   }
@@ -108,6 +117,10 @@ export async function getHoldings(accountId?: string): Promise<PortfolioHolding[
   const priceResults = await getMultipleCurrentPrices(uniqueTickers);
   const priceMap = new Map(priceResults.map(p => [p.ticker, p]));
 
+  // Aggregate view: all holdings are converted to USD so they can be summed
+  // and compared (account currencies span EUR/USD/NGN)
+  const aggregate = !accountId || accountId === 'all';
+
   // Pre-fetch FX rates we'll need
   const fxPairs = new Set<string>();
   for (const h of held) {
@@ -116,6 +129,7 @@ export async function getHoldings(accountId?: string): Promise<PortfolioHolding[
     if (priceCcy !== h.tradeCcy) fxPairs.add(`${priceCcy}>${h.tradeCcy}`);
     if (h.tradeCcy !== h.account_currency) fxPairs.add(`${h.tradeCcy}>${h.account_currency}`);
     if (priceCcy !== h.account_currency) fxPairs.add(`${priceCcy}>${h.account_currency}`);
+    if (aggregate && h.account_currency !== 'USD') fxPairs.add(`${h.account_currency}>USD`);
   }
   const fxCache = new Map<string, number>();
   await Promise.all([...fxPairs].map(async pair => {
@@ -149,17 +163,25 @@ export async function getHoldings(accountId?: string): Promise<PortfolioHolding[
       dayGain = fx(fifo.quantity * priceResult.change, priceCurrency, account_currency);
     }
 
-    const meta = db.prepare('SELECT name, sector, industry, asset_type, market FROM ticker_metadata WHERE ticker = ?').get(ticker) as { name: string | null; sector: string | null; industry: string | null; asset_type: string | null; market: string | null } | undefined;
+    const meta = tickerMetaStmt.get(ticker) as { name: string | null; sector: string | null; industry: string | null; asset_type: string | null; market: string | null } | undefined;
+
+    // avg_cost is computed in the trade currency — express it in the account
+    // currency like every other money field on this holding
+    const avgCostAcct = fx(fifo.avg_cost, tradeCcy, account_currency);
+
+    // In the aggregate view convert everything to USD so rows are summable
+    const display = (v: number) => (aggregate ? fx(v, account_currency, 'USD') : v);
 
     holdings.push({
       ticker, name: meta?.name || null, sector: meta?.sector || null,
       industry: meta?.industry || null, asset_type: meta?.asset_type || null,
       market: meta?.market || null,
-      account_id, quantity: fifo.quantity, avg_cost: fifo.avg_cost,
-      cost_basis: costBasisAcct, current_price: currentPrice,
-      market_value: marketValue, unrealised_gain: unrealisedGain,
-      unrealised_gain_pct: unrealisedGainPct, day_gain: dayGain,
-      day_gain_pct: dayGainPct, allocation_pct: 0, currency: account_currency,
+      account_id, quantity: fifo.quantity, avg_cost: display(avgCostAcct),
+      cost_basis: display(costBasisAcct), current_price: display(currentPrice),
+      market_value: display(marketValue), unrealised_gain: display(unrealisedGain),
+      unrealised_gain_pct: unrealisedGainPct, day_gain: display(dayGain),
+      day_gain_pct: dayGainPct, allocation_pct: 0,
+      currency: aggregate ? 'USD' : account_currency,
     });
   }
 
@@ -175,30 +197,31 @@ export async function getHoldings(accountId?: string): Promise<PortfolioHolding[
 
 // --- Cash Balance ---
 
-export function getCashBalance(accountId: string): number {
-  const deposits = db.prepare(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ? AND type = 'deposit'`
-  ).get(accountId) as { total: number };
+export async function getCashBalance(accountId: string): Promise<number> {
+  const account = db.prepare('SELECT currency FROM accounts WHERE id = ?').get(accountId) as { currency: string } | undefined;
+  if (!account) return 0;
 
-  const withdrawals = db.prepare(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ? AND type = 'withdrawal'`
-  ).get(accountId) as { total: number };
+  // Net cash movement per transaction currency, so a USD-priced buy in a EUR
+  // account is converted instead of being subtracted 1:1 from EUR deposits
+  const rows = db.prepare(
+    `SELECT COALESCE(NULLIF(currency, ''), ?) as ccy,
+            COALESCE(SUM(CASE type
+              WHEN 'deposit' THEN amount
+              WHEN 'withdrawal' THEN -amount
+              WHEN 'dividend' THEN amount
+              WHEN 'buy' THEN -(quantity * price_per_unit + commission)
+              WHEN 'sell' THEN quantity * price_per_unit - commission
+            END), 0) as total
+     FROM transactions
+     WHERE account_id = ?
+     GROUP BY ccy`
+  ).all(account.currency, accountId) as { ccy: string; total: number }[];
 
-  const buyCosts = db.prepare(
-    `SELECT COALESCE(SUM(quantity * price_per_unit + commission), 0) as total
-     FROM transactions WHERE account_id = ? AND type = 'buy'`
-  ).get(accountId) as { total: number };
-
-  const sellProceeds = db.prepare(
-    `SELECT COALESCE(SUM(quantity * price_per_unit - commission), 0) as total
-     FROM transactions WHERE account_id = ? AND type = 'sell'`
-  ).get(accountId) as { total: number };
-
-  const dividends = db.prepare(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ? AND type = 'dividend'`
-  ).get(accountId) as { total: number };
-
-  return deposits.total - withdrawals.total - buyCosts.total + sellProceeds.total + dividends.total;
+  let balance = 0;
+  for (const row of rows) {
+    balance += await convert(row.total, row.ccy, account.currency);
+  }
+  return balance;
 }
 
 // --- Portfolio Value ---
@@ -211,7 +234,7 @@ export async function getPortfolioValue(accountId: string): Promise<{ value: num
   const holdingsValue = holdings.reduce((sum, h) => sum + h.market_value, 0);
 
   const trackCash = account.track_cash !== 0;
-  const cash = trackCash ? getCashBalance(accountId) : 0;
+  const cash = trackCash ? await getCashBalance(accountId) : 0;
 
   return {
     value: holdingsValue + cash,
@@ -231,7 +254,8 @@ export interface AccountValue {
   value_eur: number;
   value_usd: number;
   holdings_value: number;
-  cash: number;
+  cash: number; // in the account's currency
+  cash_usd: number;
 }
 
 export interface AggregateValue {
@@ -250,6 +274,7 @@ export async function getAggregateValue(): Promise<AggregateValue> {
     const pv = await getPortfolioValue(account.id);
     const valueEur = await convert(pv.value, account.currency, 'EUR');
     const valueUsd = await convert(pv.value, account.currency, 'USD');
+    const cashUsd = await convert(pv.cash, account.currency, 'USD');
 
     accountValues.push({
       account_id: account.id,
@@ -260,6 +285,7 @@ export async function getAggregateValue(): Promise<AggregateValue> {
       value_usd: valueUsd,
       holdings_value: pv.holdings_value,
       cash: pv.cash,
+      cash_usd: cashUsd,
     });
 
     totalEur += valueEur;
@@ -271,17 +297,38 @@ export async function getAggregateValue(): Promise<AggregateValue> {
 
 // --- Total Deposited ---
 
-export function getTotalDeposited(accountId?: string): number {
+/**
+ * Total deposited. Single account: in the account's currency.
+ * Aggregate: converted to USD (deposits are in EUR, USD and NGN — a raw sum
+ * would be meaningless).
+ */
+export async function getTotalDeposited(accountId?: string): Promise<number> {
   if (accountId && accountId !== 'all') {
-    const result = db.prepare(
-      `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ? AND type = 'deposit'`
-    ).get(accountId) as { total: number };
-    return result.total;
+    const account = db.prepare('SELECT currency FROM accounts WHERE id = ?').get(accountId) as { currency: string } | undefined;
+    const rows = db.prepare(
+      `SELECT COALESCE(NULLIF(t.currency, ''), a.currency) as ccy, COALESCE(SUM(t.amount), 0) as total
+       FROM transactions t JOIN accounts a ON t.account_id = a.id
+       WHERE t.account_id = ? AND t.type = 'deposit'
+       GROUP BY ccy`
+    ).all(accountId) as { ccy: string; total: number }[];
+    let total = 0;
+    for (const row of rows) {
+      total += await convert(row.total, row.ccy, account?.currency || row.ccy);
+    }
+    return total;
   }
-  const result = db.prepare(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'deposit'`
-  ).get() as { total: number };
-  return result.total;
+
+  const rows = db.prepare(
+    `SELECT COALESCE(NULLIF(t.currency, ''), a.currency) as ccy, COALESCE(SUM(t.amount), 0) as total
+     FROM transactions t JOIN accounts a ON t.account_id = a.id
+     WHERE t.type = 'deposit'
+     GROUP BY ccy`
+  ).all() as { ccy: string; total: number }[];
+  let total = 0;
+  for (const row of rows) {
+    total += await convert(row.total, row.ccy, 'USD');
+  }
+  return total;
 }
 
 // --- Daily PnL ---
@@ -295,6 +342,16 @@ export async function getDailyPnL(accountId?: string): Promise<DailyPnL> {
   // Get current holdings and their prices
   const holdings = await getHoldings(accountId);
 
+  // Holdings are valued in their account's currency — convert to USD when
+  // aggregating across accounts
+  const aggregate = !accountId || accountId === 'all';
+  const fxCache = new Map<string, number>();
+  const toDisplay = async (amount: number, ccy: string) => {
+    if (!aggregate || ccy === 'USD') return amount;
+    if (!fxCache.has(ccy)) fxCache.set(ccy, await convert(1, ccy, 'USD'));
+    return amount * fxCache.get(ccy)!;
+  };
+
   let todayChange = 0;
   let prevValue = 0;
 
@@ -302,11 +359,10 @@ export async function getDailyPnL(accountId?: string): Promise<DailyPnL> {
     // Use regularMarketChange from the price service if we had it cached
     // For now, approximate: day change = current_price - previous_close
     // This is a simplified version — will improve with daily snapshots
-    todayChange += h.day_gain;
-    prevValue += h.market_value - h.day_gain;
+    todayChange += await toDisplay(h.day_gain, h.currency);
+    prevValue += await toDisplay(h.market_value - h.day_gain, h.currency);
   }
 
-  const currentValue = holdings.reduce((s, h) => s + h.market_value, 0);
   const todayPct = prevValue > 0 ? (todayChange / prevValue) * 100 : 0;
 
   // Yesterday's change — would need historical snapshots for accuracy
@@ -324,12 +380,25 @@ export interface AllTimePnL {
   realised: number;
   dividends: number;
   total: number;
-  total_pct: number;
+  total_pct: number | null;
 }
 
+/**
+ * All-time P/L. Single account: in the account's currency.
+ * Aggregate: converted to USD.
+ */
 export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
   const condition = accountId && accountId !== 'all' ? 'AND t.account_id = ?' : '';
   const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
+  const aggregate = !accountId || accountId === 'all';
+
+  // Display-currency conversion (USD for the aggregate view)
+  const fxCache = new Map<string, number>();
+  const toDisplay = async (amount: number, ccy: string) => {
+    if (!aggregate || ccy === 'USD') return amount;
+    if (!fxCache.has(ccy)) fxCache.set(ccy, await convert(1, ccy, 'USD'));
+    return amount * fxCache.get(ccy)!;
+  };
 
   // Get all tickers with buy/sell transactions
   const tickers = db.prepare(
@@ -344,25 +413,18 @@ export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
   let totalCostBasis = 0;
 
   for (const { ticker, account_id, account_currency } of tickers) {
-    const txs = db.prepare(
-      `SELECT date, type, quantity, price_per_unit
-       FROM transactions
-       WHERE ticker = ? AND account_id = ? AND type IN ('buy', 'sell')
-       ORDER BY date`
-    ).all(ticker, account_id) as Pick<Transaction, 'date' | 'type' | 'quantity' | 'price_per_unit'>[];
+    const txs = tickerTxsStmt.all(ticker, account_id) as Pick<Transaction, 'date' | 'type' | 'quantity' | 'price_per_unit' | 'commission'>[];
 
     const fifo = computeFIFO(txs);
 
     // Determine trading currency
-    const tradeCcy = (db.prepare(
-      `SELECT currency FROM transactions WHERE ticker = ? AND account_id = ? AND type = 'buy' LIMIT 1`
-    ).get(ticker, account_id) as { currency: string } | undefined)?.currency || account_currency;
+    const tradeCcy = (tradeCcyStmt.get(ticker, account_id) as { currency: string } | undefined)?.currency || account_currency;
 
     // Convert realised gain from native currency to account currency
     const realisedInAcct = tradeCcy !== account_currency
       ? await convert(fifo.realised_gain, tradeCcy, account_currency)
       : fifo.realised_gain;
-    totalRealised += realisedInAcct;
+    totalRealised += await toDisplay(realisedInAcct, account_currency);
 
     // For open positions, compute unrealised gain
     if (fifo.quantity > 0.0001) {
@@ -381,28 +443,35 @@ export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
       const unrealisedInAcct = tradeCcy !== account_currency
         ? await convert(nativePL, tradeCcy, account_currency)
         : nativePL;
-      totalUnrealised += unrealisedInAcct;
+      totalUnrealised += await toDisplay(unrealisedInAcct, account_currency);
 
       // Cost basis in account currency for percentage calculation
       const costInAcct = tradeCcy !== account_currency
         ? await convert(fifo.cost_basis, tradeCcy, account_currency)
         : fifo.cost_basis;
-      totalCostBasis += costInAcct;
+      totalCostBasis += await toDisplay(costInAcct, account_currency);
     }
   }
 
-  // Sum dividends (already in account currency from import)
-  const divCondition = accountId && accountId !== 'all' ? 'WHERE account_id = ?' : '';
-  const divParams: string[] = accountId && accountId !== 'all' ? [accountId] : [];
-  const divResult = db.prepare(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions ${divCondition ? divCondition + ' AND' : 'WHERE'} type = 'dividend'`
-  ).get(...divParams) as { total: number };
-  const totalDividends = divResult.total;
+  // Sum dividends per currency and convert to the display currency
+  const divRows = db.prepare(
+    `SELECT COALESCE(NULLIF(t.currency, ''), a.currency) as ccy, COALESCE(SUM(t.amount), 0) as total
+     FROM transactions t JOIN accounts a ON t.account_id = a.id
+     WHERE t.type = 'dividend' ${condition}
+     GROUP BY ccy`
+  ).all(...params) as { ccy: string; total: number }[];
+  let totalDividends = 0;
+  if (aggregate) {
+    for (const row of divRows) totalDividends += await toDisplay(row.total, row.ccy);
+  } else {
+    const account = db.prepare('SELECT currency FROM accounts WHERE id = ?').get(accountId) as { currency: string } | undefined;
+    for (const row of divRows) totalDividends += await convert(row.total, row.ccy, account?.currency || row.ccy);
+  }
 
   const total = totalUnrealised + totalRealised + totalDividends;
-  // Total invested = current cost basis + what was spent on sold positions (approximated as cost basis + realised = proceeds)
-  const totalInvested = totalCostBasis > 0 ? totalCostBasis : 1;
-  const totalPct = (total / totalInvested) * 100;
+  // Percentage is relative to the cost basis of open positions; without any
+  // open positions there is no meaningful base — report null, not a division by 1
+  const totalPct = totalCostBasis > 0.01 ? (total / totalCostBasis) * 100 : null;
 
   return {
     unrealised: totalUnrealised,

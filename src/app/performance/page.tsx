@@ -1,21 +1,22 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import BenchmarkTable from '@/components/performance/BenchmarkTable';
 import HistoricalReturnChart from '@/components/performance/HistoricalReturnChart';
 import AccountSelector from '@/components/layout/AccountSelector';
 import LoadingSkeleton, { TableSkeleton, ChartSkeleton } from '@/components/ui/LoadingSkeleton';
+import { useApi } from '@/lib/hooks';
 
 interface PeriodReturn {
   period: string;
-  mwr?: number;
-  return_pct?: number;
+  mwr?: number | null;
+  return_pct?: number | null;
 }
 
 interface HistoricalReturn {
   period: string;
-  return_pct: number;
+  return_pct: number | null;
 }
 
 interface PerformanceData {
@@ -30,18 +31,11 @@ interface PerformanceData {
 function PerformanceContent() {
   const searchParams = useSearchParams();
   const account = searchParams.get('account') || 'all';
-  const [data, setData] = useState<PerformanceData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState<'monthly' | 'quarterly' | 'annually'>('monthly');
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/performance?account=${account}&granularity=${granularity}`)
-      .then(r => r.json())
-      .then(json => { if (json.data) setData(json.data); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [account, granularity]);
+  const { data: body, loading, error } = useApi<{ data: PerformanceData }>(
+    `/api/performance?account=${account}&granularity=${granularity}`
+  );
+  const data = body?.data || null;
 
   return (
     <div className="space-y-6">
@@ -49,6 +43,12 @@ function PerformanceContent() {
         <h1 className="text-2xl font-semibold text-gray-900">Performance</h1>
         <AccountSelector />
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          Failed to load performance data: {error}
+        </div>
+      )}
 
       {loading ? (
         <>

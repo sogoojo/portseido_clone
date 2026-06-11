@@ -34,6 +34,30 @@ const WATCHLIST: { ticker: string; tier: number; target_entry: number; notes: st
   { ticker: 'DDOG', tier: 3, target_entry: 122, notes: 'Small position, let ride' },
 ];
 
+// Nigerian (NGX) watchlist — tracked in a separate section of the watchlist
+// page. No analyst data exists for these; signals derive from TradingView
+// candle history (50/200-day MAs, 52-week range).
+const NGX_WATCHLIST: { ticker: string; name: string }[] = [
+  { ticker: 'NSENG:DANGCEM', name: 'Dangote Cement' },
+  { ticker: 'NSENG:ZENITHBANK', name: 'Zenith Bank' },
+  { ticker: 'NSENG:ACCESSCORP', name: 'Access Holdings' },
+  { ticker: 'NSENG:FCMB', name: 'FCMB Group' },
+  { ticker: 'NSENG:MTNN', name: 'MTN Nigeria' },
+  { ticker: 'NSENG:NESTLE', name: 'Nestle Nigeria' },
+  { ticker: 'NSENG:BETAGLAS', name: 'Beta Glass' },
+  { ticker: 'NSENG:WAPCO', name: 'Lafarge Africa' },
+  { ticker: 'NSENG:PRESCO', name: 'Presco' },
+  { ticker: 'NSENG:OKOMUOIL', name: 'Okomu Oil Palm' },
+  { ticker: 'NSENG:SEPLAT', name: 'Seplat Energy' },
+  { ticker: 'NSENG:UBA', name: 'United Bank for Africa' },
+  { ticker: 'NSENG:BUAFOODS', name: 'BUA Foods' },
+  { ticker: 'NSENG:AIICO', name: 'AIICO Insurance' },
+  { ticker: 'NSENG:NEM', name: 'NEM Insurance' },
+  { ticker: 'NSENG:ARADEL', name: 'Aradel Holdings' },
+  { ticker: 'NSENG:MECURE', name: 'MeCure Industries' },
+  { ticker: 'NSENG:BUACEMENT', name: 'BUA Cement' },
+];
+
 // Seed once: only if no watchlist row has a target yet (stray tickers from the
 // summaries feature don't count, and user edits are never overwritten).
 export function seedWatchlist(db: BetterSqlite3.Database): void {
@@ -49,6 +73,23 @@ export function seedWatchlist(db: BetterSqlite3.Database): void {
   );
   const tx = db.transaction(() => {
     for (const w of WATCHLIST) insert.run(w.ticker, w.target_entry, w.tier, w.notes);
+  });
+  tx();
+}
+
+// One-time seed of the NGX watchlist, tracked in _migrations so later
+// deletions by the user are never re-added on boot.
+export function seedNgxWatchlist(db: BetterSqlite3.Database): void {
+  const applied = db.prepare(`SELECT 1 FROM _migrations WHERE name = 'seed-ngx-watchlist'`).get();
+  if (applied) return;
+
+  const insert = db.prepare(
+    `INSERT INTO watchlist (ticker, name) VALUES (?, ?)
+     ON CONFLICT(ticker) DO UPDATE SET name = COALESCE(watchlist.name, excluded.name)`
+  );
+  const tx = db.transaction(() => {
+    for (const w of NGX_WATCHLIST) insert.run(w.ticker, w.name);
+    db.prepare(`INSERT INTO _migrations (name) VALUES ('seed-ngx-watchlist')`).run();
   });
   tx();
 }

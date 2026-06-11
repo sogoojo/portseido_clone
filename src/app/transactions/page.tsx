@@ -1,26 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
-import type { Transaction, Account } from '@/lib/types';
+import { useState, useCallback, Suspense } from 'react';
+import type { Transaction } from '@/lib/types';
 import TransactionTable from '@/components/transactions/TransactionTable';
 import TransactionForm from '@/components/transactions/TransactionForm';
 import CsvImport from '@/components/transactions/CsvImport';
 import AccountSelector from '@/components/layout/AccountSelector';
+import { useAccounts } from '@/lib/hooks';
 
 function TransactionsContent() {
   const [showForm, setShowForm] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-
-  useEffect(() => {
-    fetch('/api/accounts')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.data) setAccounts(json.data);
-      })
-      .catch(() => {});
-  }, []);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const accounts = useAccounts();
 
   const refresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -32,11 +25,17 @@ function TransactionsContent() {
   }
 
   async function handleDelete(id: number) {
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/transactions?id=${id}`, { method: 'DELETE' });
-      if (res.ok) refresh();
+      if (res.ok) {
+        refresh();
+      } else {
+        const json = await res.json().catch(() => null);
+        setDeleteError(json?.message || `Failed to delete transaction (${res.status})`);
+      }
     } catch {
-      // silent
+      setDeleteError('Network error while deleting transaction');
     }
   }
 
@@ -64,6 +63,12 @@ function TransactionsContent() {
           </button>
         </div>
       </div>
+
+      {deleteError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {deleteError}
+        </div>
+      )}
 
       <CsvImport accounts={accounts} onImported={refresh} />
 

@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import GainsReturnsPanel from './GainsReturnsPanel';
+import { useApi } from '@/lib/hooks';
 
 interface AllTimePnL {
   unrealised: number;
   realised: number;
   dividends: number;
   total: number;
-  total_pct: number;
+  total_pct: number | null;
 }
 
 interface BenchmarkQuote {
@@ -37,14 +38,9 @@ function formatMoney(value: number, currency?: string): string {
 
 export default function InfoTabs({ account, allTimePnl, currency }: InfoTabsProps) {
   const [activeTab, setActiveTab] = useState<Tab>('returns');
-  const [benchmarks, setBenchmarks] = useState<BenchmarkQuote[]>([]);
-
-  useEffect(() => {
-    fetch('/api/prices?tickers=^GSPC,^IXIC')
-      .then(r => r.json())
-      .then(json => { if (json.data) setBenchmarks(json.data); })
-      .catch(() => {});
-  }, []);
+  const { data: benchBody, loading: benchLoading, error: benchError } =
+    useApi<{ data: BenchmarkQuote[] }>('/api/prices?tickers=^GSPC,^IXIC');
+  const benchmarks = benchBody?.data || [];
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'returns', label: 'Gains & Returns' },
@@ -71,10 +67,11 @@ export default function InfoTabs({ account, allTimePnl, currency }: InfoTabsProp
         ))}
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'returns' && (
+      {/* Tab content — the returns panel stays mounted so switching tabs
+          doesn't refetch the full performance payload every time */}
+      <div className={activeTab === 'returns' ? '' : 'hidden'}>
         <GainsReturnsPanel account={account} />
-      )}
+      </div>
 
       {activeTab === 'pnl' && allTimePnl && (
         <div className="space-y-3">
@@ -101,8 +98,8 @@ export default function InfoTabs({ account, allTimePnl, currency }: InfoTabsProp
             </span>
           </div>
           <div className="text-right">
-            <span className={`text-xs tabular-nums ${allTimePnl.total_pct >= 0 ? 'text-[#16a34a]' : 'text-[#dc2626]'}`}>
-              {allTimePnl.total_pct >= 0 ? '+' : ''}{allTimePnl.total_pct.toFixed(2)}%
+            <span className={`text-xs tabular-nums ${(allTimePnl.total_pct ?? 0) >= 0 ? 'text-[#16a34a]' : 'text-[#dc2626]'}`}>
+              {allTimePnl.total_pct != null ? `${allTimePnl.total_pct >= 0 ? '+' : ''}${allTimePnl.total_pct.toFixed(2)}%` : '—'}
             </span>
           </div>
         </div>
@@ -114,8 +111,10 @@ export default function InfoTabs({ account, allTimePnl, currency }: InfoTabsProp
 
       {activeTab === 'benchmark' && (
         <div className="space-y-3">
-          {benchmarks.length === 0 ? (
+          {benchLoading ? (
             <p className="text-sm text-gray-400 py-4 text-center">Loading benchmarks...</p>
+          ) : benchError || benchmarks.length === 0 ? (
+            <p className="text-sm text-gray-400 py-4 text-center">Benchmarks unavailable</p>
           ) : (
             benchmarks.map(b => (
               <div key={b.ticker} className="flex items-center justify-between py-2 border-b border-gray-50">

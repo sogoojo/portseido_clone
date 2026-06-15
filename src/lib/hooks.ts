@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Account } from '@/lib/types';
+import type { Account, TickerOption } from '@/lib/types';
 
 interface ApiState<T> {
   data: T | null;
@@ -97,4 +97,30 @@ export function useAccounts(): Account[] {
   }, []);
 
   return accounts;
+}
+
+// --- Known tickers (for the transaction-form picker) ---
+//
+// Fetched fresh on mount rather than cached for the session: the user adds
+// transactions for new tickers here, so a stale list would hide what they
+// just entered. The payload is small (a few hundred rows at most).
+export function useTickers(): TickerOption[] {
+  const [tickers, setTickers] = useState<TickerOption[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/tickers')
+      .then(r => r.json())
+      .then(json => {
+        if (mounted) setTickers((json.data || []) as TickerOption[]);
+      })
+      .catch(() => {
+        /* picker still works as a free-text input if this fails */
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return tickers;
 }

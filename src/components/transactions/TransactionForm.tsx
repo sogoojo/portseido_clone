@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useAccounts } from '@/lib/hooks';
+import { useAccounts, useTickers } from '@/lib/hooks';
+import TickerCombobox from './TickerCombobox';
 import type { Transaction, TransactionType } from '@/lib/types';
 
 interface TransactionFormProps {
@@ -19,6 +20,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
   const isEdit = !!transaction;
 
   const accounts = useAccounts();
+  const tickers = useTickers();
   const [type, setType] = useState<TransactionType>(transaction?.type || 'buy');
   const [accountId, setAccountId] = useState(transaction?.account_id || (globalAccount !== 'all' ? globalAccount : ''));
   const [date, setDate] = useState(transaction?.date || new Date().toISOString().split('T')[0]);
@@ -198,12 +200,12 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
           {needsTicker && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Ticker</label>
-              <input
-                type="text"
+              <TickerCombobox
                 value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
-                placeholder="e.g. AAPL, BTC-USD, NSENG:MTNN"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                onChange={setTicker}
+                options={tickers}
+                preferCurrency={currency}
+                placeholder="Search e.g. AAPL, BTC-USD, NSENG:MTNN"
               />
             </div>
           )}

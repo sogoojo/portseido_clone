@@ -68,6 +68,16 @@ export interface TickerMetadata {
   updated_at: string;
 }
 
+// A known ticker for the transaction-form picker — unioned from ticker
+// metadata, the watchlist, prior transactions, and targets.
+export interface TickerOption {
+  ticker: string;
+  name: string | null;
+  market: string | null;
+  currency: string | null;
+  held: boolean; // appears in a buy/sell transaction (i.e. owned or once-owned)
+}
+
 // --- Portfolio ---
 
 export interface PortfolioHolding {

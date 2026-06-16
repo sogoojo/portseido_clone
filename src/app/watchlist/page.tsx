@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { WatchlistRow, BuySignal, TrendState, ThesisState } from '@/lib/types';
+import type { WatchlistRow, BuySignal, TrendState, ThesisState, PortfolioNote, NotePortfolio } from '@/lib/types';
 
 const SIGNAL_STYLE: Record<BuySignal, { text: string; chip: string; row: string }> = {
   strong_buy: { text: '🔥 Strong Buy', chip: 'bg-green-100 text-green-700', row: 'bg-green-50/60' },
@@ -204,6 +204,176 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
   );
 }
 
+/** Free-form action items / plans shown under each portfolio section. */
+function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers: string[] }) {
+  const [notes, setNotes] = useState<PortfolioNote[]>([]);
+  const [text, setText] = useState('');
+  const [noteTicker, setNoteTicker] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editTicker, setEditTicker] = useState('');
+  const [confirmId, setConfirmId] = useState<number | null>(null); // open item awaiting "mark done" confirmation
+
+  const listId = `note-tickers-${portfolio}`;
+
+  const load = useCallback(() => {
+    fetch(`/api/notes?portfolio=${portfolio}`)
+      .then(r => r.json())
+      .then(j => setNotes(Array.isArray(j.data) ? j.data : []))
+      .catch(() => {});
+  }, [portfolio]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const call = useCallback(async (method: string, body?: unknown, qs = '') => {
+    setErr(null);
+    const res = await fetch(`/api/notes${qs}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      throw new Error(j?.message || `Request failed (${res.status})`);
+    }
+    return res.json();
+  }, []);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setBusy(true);
+    try {
+      await call('POST', { portfolio, text: text.trim(), ticker: noteTicker.trim() || null });
+      setText(''); setNoteTicker('');
+      load();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function toggle(n: PortfolioNote) {
+    try { await call('PATCH', { id: n.id, done: !n.done }); load(); }
+    catch (e) { setErr((e as Error).message); }
+  }
+
+  async function remove(id: number) {
+    try { await call('DELETE', undefined, `?id=${id}`); load(); }
+    catch (e) { setErr((e as Error).message); }
+  }
+
+  function startEdit(n: PortfolioNote) {
+    setConfirmId(null);
+    setEditId(n.id); setEditText(n.text); setEditTicker(n.ticker ?? '');
+  }
+
+  async function commitEdit() {
+    if (editId == null) return;
+    const id = editId;
+    const trimmed = editText.trim();
+    setEditId(null);
+    if (!trimmed) return; // empty: abandon edit, keep original
+    try { await call('PATCH', { id, text: trimmed, ticker: editTicker.trim() || null }); load(); }
+    catch (e) { setErr((e as Error).message); }
+  }
+
+  const open = notes.filter(n => !n.done);
+  const done = notes.filter(n => n.done);
+
+  const renderNote = (n: PortfolioNote) => (
+    <li key={n.id} className={`flex items-start gap-2 py-1 ${confirmId === n.id ? 'rounded bg-green-50/60' : ''}`}>
+      <input
+        type="checkbox"
+        checked={n.done || confirmId === n.id}
+        onChange={() => {
+          if (n.done) toggle(n);                       // un-done: instant (reversible, low risk)
+          else if (confirmId === n.id) setConfirmId(null); // click again = cancel
+          else { setEditId(null); setConfirmId(n.id); }    // open → ask before completing
+        }}
+        className="mt-1 h-3.5 w-3.5 shrink-0 cursor-pointer accent-gray-900"
+        aria-label={n.done ? `Mark "${n.text}" not done` : `Mark "${n.text}" done`}
+      />
+      {confirmId === n.id ? (
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          {n.ticker && (
+            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">{n.ticker}</span>
+          )}
+          <span className="text-sm text-gray-700">{n.text}</span>
+          <span className="ml-auto flex items-center gap-2">
+            <span className="text-[11px] text-gray-500">Mark done?</span>
+            <button onClick={() => { setConfirmId(null); toggle(n); }}
+              className="rounded bg-green-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-green-700">Yes</button>
+            <button onClick={() => setConfirmId(null)}
+              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50">Cancel</button>
+          </span>
+        </div>
+      ) : editId === n.id ? (
+        <div
+          className="flex flex-1 flex-wrap items-center gap-2"
+          onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) commitEdit(); }}
+        >
+          <input list={listId} value={editTicker} onChange={e => setEditTicker(e.target.value.toUpperCase())}
+            placeholder="Ticker"
+            className="w-24 rounded border border-gray-300 px-1.5 py-0.5 text-xs focus:border-blue-500 focus:outline-none" />
+          <input autoFocus value={editText} onChange={e => setEditText(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') setEditId(null); }}
+            className="flex-1 min-w-[160px] rounded border border-blue-400 px-1.5 py-0.5 text-sm focus:outline-none" />
+        </div>
+      ) : (
+        <>
+          <button onClick={() => startEdit(n)} className="flex flex-1 items-start gap-2 text-left" title="Click to edit">
+            {n.ticker && (
+              <span className="mt-0.5 shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">{n.ticker}</span>
+            )}
+            <span className={`text-sm ${n.done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{n.text}</span>
+          </button>
+          <button onClick={() => remove(n.id)} className="text-gray-300 hover:text-red-500" title="Delete" aria-label={`Delete note "${n.text}"`}>×</button>
+        </>
+      )}
+    </li>
+  );
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Action items &amp; plans</h3>
+        {done.length > 0 && (
+          <button onClick={() => setShowDone(s => !s)} className="text-[11px] text-gray-400 hover:text-gray-600">
+            {showDone ? 'Hide' : 'Show'} completed ({done.length})
+          </button>
+        )}
+      </div>
+
+      <form onSubmit={add} className="mb-2 flex flex-wrap items-center gap-2">
+        <input list={listId} value={noteTicker} onChange={e => setNoteTicker(e.target.value.toUpperCase())}
+          placeholder="Ticker (optional)"
+          className="w-32 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none" />
+        <datalist id={listId}>{tickers.map(t => <option key={t} value={t} />)}</datalist>
+        <input value={text} onChange={e => setText(e.target.value)}
+          placeholder="What do you plan to do? e.g. Close higher, recycle into META"
+          className="flex-1 min-w-[200px] rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none" />
+        <button type="submit" disabled={busy}
+          className="rounded-md bg-gray-900 px-3 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+          {busy ? 'Adding…' : 'Add'}
+        </button>
+      </form>
+
+      {err && <p className="mb-1 text-xs text-red-600">{err}</p>}
+
+      {open.length === 0 && done.length === 0 ? (
+        <p className="text-xs text-gray-400">No action items yet — jot down what you plan to do.</p>
+      ) : (
+        <ul className="divide-y divide-gray-100">
+          {open.map(renderNote)}
+          {showDone && done.map(renderNote)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function WatchlistPage() {
   const [rows, setRows] = useState<WatchlistRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -335,6 +505,7 @@ export default function WatchlistPage() {
             <section className="space-y-2">
               <h2 className="text-sm font-semibold text-gray-700">Global</h2>
               <WatchlistTable rows={globalRows} onRemove={remove} onUpdateAnchor={updateAnchor} />
+              <NotesPanel portfolio="global" tickers={globalRows.map(r => r.ticker)} />
             </section>
           )}
           {ngxRows.length > 0 && (
@@ -345,6 +516,7 @@ export default function WatchlistPage() {
                 NGX signals use TradingView candle history (50/200-day MAs, 52-week range) — no analyst
                 coverage exists, so fair entry is the 200-day MA − 5% unless you set an anchor.
               </p>
+              <NotesPanel portfolio="ngx" tickers={ngxRows.map(r => r.ticker.replace(/^NSENG:/, ''))} />
             </section>
           )}
         </>

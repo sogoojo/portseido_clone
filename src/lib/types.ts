@@ -221,6 +221,19 @@ export interface TargetRow {
   target_pct: number;
 }
 
+export type NotePortfolio = 'global' | 'ngx';
+
+/** A free-form action item / plan shown under a watchlist portfolio section. */
+export interface PortfolioNote {
+  id: number;
+  portfolio: NotePortfolio;
+  ticker: string | null;  // optional associated ticker, e.g. 'AAPL'
+  text: string;
+  done: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export type RebalanceStatus = 'underweight' | 'on_target' | 'overweight' | 'untracked';
 
 export interface RebalanceRow {

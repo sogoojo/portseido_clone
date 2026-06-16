@@ -117,3 +117,17 @@ CREATE TABLE IF NOT EXISTS targets (
   tier INTEGER,            -- 1 stability / 2 growth / 3 speculative
   target_pct REAL NOT NULL -- percent of total portfolio value
 );
+
+-- Free-form action items / plans shown under each watchlist portfolio section.
+-- portfolio is 'global' | 'ngx'; ticker is an optional association (e.g. 'AAPL').
+CREATE TABLE IF NOT EXISTS portfolio_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  portfolio TEXT NOT NULL,
+  ticker TEXT,
+  text TEXT NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_notes_portfolio ON portfolio_notes(portfolio);

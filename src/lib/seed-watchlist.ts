@@ -17,6 +17,7 @@ const WATCHLIST: { ticker: string; tier: number; target_entry: number; notes: st
   { ticker: 'NET', tier: 2, target_entry: 175, notes: 'Above target allocation' },
   { ticker: 'VRT', tier: 2, target_entry: 220, notes: 'Data center power play' },
   { ticker: 'AMD', tier: 2, target_entry: 190, notes: 'AI challenger, underweight' },
+  { ticker: 'MRVL', tier: 2, target_entry: 280, notes: 'AI/data-center semi, custom silicon' },
   { ticker: 'NU', tier: 2, target_entry: 13, notes: 'LatAm fintech, 2x potential' },
   { ticker: 'NVO', tier: 2, target_entry: 43, notes: 'GLP-1 leader' },
   { ticker: 'AXON', tier: 2, target_entry: 451, notes: 'Defense tech, quality compounder' },

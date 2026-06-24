@@ -161,7 +161,9 @@ export async function getWatchlistRows(): Promise<WatchlistRow[]> {
     const ma200 = pr.twoHundredDayAverage ?? stats?.ma200 ?? null;
     const analyst = latestAnalyst(item.ticker);
 
-    // Dynamic "fair entry" = blend of (200-day MA − 5%) and (analyst target − 20%).
+    // Your hand-set anchor (target_entry) always wins. The dynamic blend —
+    // (200-day MA − 5%) averaged with (analyst target − 20%) — is only a
+    // fallback for tickers you haven't priced yourself (e.g. NGX names).
     const candidates: number[] = [];
     if (ma200 != null) candidates.push(ma200 * 0.95);
     if (analyst?.target_mean != null) candidates.push(analyst.target_mean * 0.80);
@@ -169,9 +171,9 @@ export async function getWatchlistRows(): Promise<WatchlistRow[]> {
       ? candidates.reduce((a, b) => a + b, 0) / candidates.length
       : null;
 
-    const effectiveTarget = dynamicTarget ?? item.target_entry ?? null;
+    const effectiveTarget = item.target_entry ?? dynamicTarget ?? null;
     const targetBasis: WatchlistRow['target_basis'] =
-      dynamicTarget != null ? 'dynamic' : item.target_entry != null ? 'fixed' : 'none';
+      item.target_entry != null ? 'fixed' : dynamicTarget != null ? 'dynamic' : 'none';
 
     const distance =
       effectiveTarget != null && price ? (effectiveTarget - price) / price : null;

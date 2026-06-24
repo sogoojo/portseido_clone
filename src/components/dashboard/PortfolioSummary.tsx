@@ -14,7 +14,7 @@ interface PortfolioSummaryProps {
   todayPnL: PnL;
   allTimeGain: number;
   allTimeGainPct: number | null;
-  totalDeposited: number;
+  invested: number;
 }
 
 function formatMoney(value: number, currency?: string): string {
@@ -34,7 +34,7 @@ export default function PortfolioSummary({
   todayPnL,
   allTimeGain,
   allTimeGainPct,
-  totalDeposited,
+  invested,
 }: PortfolioSummaryProps) {
   const displayCurrency = isAggregate ? 'USD' : currency || 'USD';
   const gainColor = allTimeGain >= 0 ? 'text-[#16a34a]' : 'text-[#dc2626]';
@@ -77,7 +77,7 @@ export default function PortfolioSummary({
         <div>
           <p className="text-xs text-gray-500 uppercase tracking-wider">Invested</p>
           <p className="text-lg font-semibold tabular-nums text-gray-900 mt-0.5">
-            {formatMoney(totalDeposited, displayCurrency)}
+            {formatMoney(invested, displayCurrency)}
           </p>
         </div>
         <div>

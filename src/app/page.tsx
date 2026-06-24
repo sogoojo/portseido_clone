@@ -23,7 +23,10 @@ function DashboardContent() {
   const allTimePnl = portfolio?.all_time_pnl;
   const allTimeGain = allTimePnl?.total ?? 0;
   const allTimeGainPct = allTimePnl?.total_pct ?? null;
-  const totalDeposited = portfolio?.total_deposited ?? 0;
+  // "Invested" = cost basis of current holdings, the same base the all-time
+  // gain % is measured against. (Deposits aren't tracked for most accounts, so
+  // total_deposited reads 0 for them — not a usable "invested" figure.)
+  const invested = allTimePnl?.cost_basis ?? 0;
   const displayCurrency = isAggregate ? 'USD' : portfolio?.currency || 'USD';
 
   return (
@@ -65,7 +68,7 @@ function DashboardContent() {
               todayPnL={portfolio.pnl?.today || { amount: 0, pct: 0 }}
               allTimeGain={allTimeGain}
               allTimeGainPct={allTimeGainPct}
-              totalDeposited={totalDeposited}
+              invested={invested}
             />
           </div>
           <div className="lg:col-span-3">

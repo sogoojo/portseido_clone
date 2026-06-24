@@ -381,6 +381,7 @@ export interface AllTimePnL {
   dividends: number;
   total: number;
   total_pct: number | null;
+  cost_basis: number; // cost basis of current open positions (display ccy) — the % denominator
 }
 
 /**
@@ -479,5 +480,6 @@ export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
     dividends: totalDividends,
     total,
     total_pct: totalPct,
+    cost_basis: totalCostBasis,
   };
 }

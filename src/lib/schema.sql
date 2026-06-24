@@ -120,12 +120,16 @@ CREATE TABLE IF NOT EXISTS targets (
 
 -- Free-form action items / plans shown under each watchlist portfolio section.
 -- portfolio is 'global' | 'ngx'; ticker is an optional association (e.g. 'AAPL').
+-- remind_at (ISO 8601 UTC) optionally turns an item into a reminder; notified_at
+-- is stamped (ISO 8601 UTC) once a Telegram push has gone out, so it fires once.
 CREATE TABLE IF NOT EXISTS portfolio_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   portfolio TEXT NOT NULL,
   ticker TEXT,
   text TEXT NOT NULL,
   done INTEGER NOT NULL DEFAULT 0,
+  remind_at TEXT,
+  notified_at TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

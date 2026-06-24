@@ -65,6 +65,10 @@ const migrations = [
   `ALTER TABLE watchlist ADD COLUMN target_entry REAL`,
   `ALTER TABLE watchlist ADD COLUMN tier INTEGER`,
   `ALTER TABLE watchlist ADD COLUMN notes TEXT`,
+  // Action-item reminders (ISO 8601 UTC): remind_at = when to nudge,
+  // notified_at = when a Telegram push went out (null = still pending)
+  `ALTER TABLE portfolio_notes ADD COLUMN remind_at TEXT`,
+  `ALTER TABLE portfolio_notes ADD COLUMN notified_at TEXT`,
 ];
 for (const sql of migrations) {
   try {

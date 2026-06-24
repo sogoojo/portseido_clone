@@ -1,0 +1,36 @@
+name: Reminders
+
+# Triggers /api/cron/reminders on the deployed Fly app every hour. The endpoint
+# scans action items whose remind_at has passed and delivers them over Telegram,
+# stamping notified_at so each fires exactly once. Hourly granularity matches the
+# "remind me this morning / today / Monday" use case — GitHub cron is best-effort
+# and not minute-precise, so we don't promise to-the-minute delivery.
+
+on:
+  schedule:
+    - cron: '5 * * * *' # hourly, a few minutes past the hour to dodge top-of-hour load
+  workflow_dispatch: {} # manual runs
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/cron/reminders
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt..."
+            status=$(curl -sS -o /tmp/body -w '%{http_code}' \
+              --max-time 60 -X POST \
+              -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+              https://portseido-lite.fly.dev/api/cron/reminders) || status=000
+            echo "HTTP $status"
+            cat /tmp/body || true
+            echo
+            if [ "$status" = "200" ]; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Failed after 3 attempts"
+          exit 1

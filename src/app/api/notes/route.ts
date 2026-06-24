@@ -6,6 +6,16 @@ const PORTFOLIOS: NotePortfolio[] = ['global', 'ngx'];
 const isPortfolio = (v: unknown): v is NotePortfolio =>
   typeof v === 'string' && (PORTFOLIOS as string[]).includes(v);
 
+// Normalise a client-supplied reminder time to ISO 8601 UTC (or null to clear).
+// Returns { ok: false } for an unparseable value so the route can 400.
+function normalizeRemindAt(v: unknown): { ok: true; value: string | null } | { ok: false } {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  if (typeof v !== 'string') return { ok: false };
+  const t = Date.parse(v);
+  if (Number.isNaN(t)) return { ok: false };
+  return { ok: true, value: new Date(t).toISOString() };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const portfolio = request.nextUrl.searchParams.get('portfolio');
@@ -24,7 +34,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { portfolio, text, ticker } = await request.json();
+    const { portfolio, text, ticker, remind_at } = await request.json();
     if (!isPortfolio(portfolio)) {
       return NextResponse.json(
         { error: 'validation', message: "portfolio must be 'global' or 'ngx'" },
@@ -35,8 +45,12 @@ export async function POST(request: NextRequest) {
     if (!trimmed) {
       return NextResponse.json({ error: 'validation', message: 'text is required' }, { status: 400 });
     }
+    const remind = normalizeRemindAt(remind_at);
+    if (!remind.ok) {
+      return NextResponse.json({ error: 'validation', message: 'remind_at must be a valid date' }, { status: 400 });
+    }
     const tickerVal = typeof ticker === 'string' && ticker.trim() ? ticker.trim().toUpperCase() : null;
-    return NextResponse.json({ data: addNote(portfolio, trimmed, tickerVal) });
+    return NextResponse.json({ data: addNote(portfolio, trimmed, tickerVal, remind.value) });
   } catch (err) {
     console.error('[API/notes] Error:', err);
     return NextResponse.json({ error: 'server', message: (err as Error).message }, { status: 500 });
@@ -45,11 +59,11 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { id, text, done, ticker } = await request.json();
+    const { id, text, done, ticker, remind_at } = await request.json();
     if (typeof id !== 'number') {
       return NextResponse.json({ error: 'validation', message: 'id is required' }, { status: 400 });
     }
-    const fields: { text?: string; done?: boolean; ticker?: string | null } = {};
+    const fields: { text?: string; done?: boolean; ticker?: string | null; remind_at?: string | null } = {};
     if (text !== undefined) {
       const trimmed = typeof text === 'string' ? text.trim() : '';
       if (!trimmed) {
@@ -65,6 +79,13 @@ export async function PATCH(request: NextRequest) {
     }
     if (ticker !== undefined) {
       fields.ticker = typeof ticker === 'string' && ticker.trim() ? ticker.trim().toUpperCase() : null;
+    }
+    if (remind_at !== undefined) {
+      const remind = normalizeRemindAt(remind_at);
+      if (!remind.ok) {
+        return NextResponse.json({ error: 'validation', message: 'remind_at must be a valid date' }, { status: 400 });
+      }
+      fields.remind_at = remind.value;
     }
     const note = updateNote(id, fields);
     if (!note) {

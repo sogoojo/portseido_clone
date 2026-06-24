@@ -204,17 +204,42 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
   );
 }
 
+// Reminder time helpers. <input type="datetime-local"> works in the user's local
+// zone with no offset; we store ISO 8601 UTC, so convert at the boundary.
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function localInputToIso(v: string): string | null {
+  return v ? new Date(v).toISOString() : null;
+}
+function formatRemind(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+// Colour + suffix for a reminder chip: sent (grey), due-but-unsent (amber), or pending (grey).
+function remindMeta(n: PortfolioNote): { cls: string; suffix: string } {
+  if (n.notified_at) return { cls: 'text-gray-400', suffix: ' · sent' };
+  const due = new Date(n.remind_at as string).getTime() <= Date.now();
+  return due ? { cls: 'text-amber-600', suffix: ' · due' } : { cls: 'text-gray-500', suffix: '' };
+}
+
 /** Free-form action items / plans shown under each portfolio section. */
 function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers: string[] }) {
   const [notes, setNotes] = useState<PortfolioNote[]>([]);
   const [text, setText] = useState('');
   const [noteTicker, setNoteTicker] = useState('');
+  const [remindAt, setRemindAt] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [editTicker, setEditTicker] = useState('');
+  const [editRemind, setEditRemind] = useState('');
   const [confirmId, setConfirmId] = useState<number | null>(null); // open item awaiting "mark done" confirmation
 
   const listId = `note-tickers-${portfolio}`;
@@ -247,8 +272,13 @@ function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers:
     if (!text.trim()) return;
     setBusy(true);
     try {
-      await call('POST', { portfolio, text: text.trim(), ticker: noteTicker.trim() || null });
-      setText(''); setNoteTicker('');
+      await call('POST', {
+        portfolio,
+        text: text.trim(),
+        ticker: noteTicker.trim() || null,
+        remind_at: localInputToIso(remindAt),
+      });
+      setText(''); setNoteTicker(''); setRemindAt('');
       load();
     } catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
@@ -266,7 +296,7 @@ function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers:
 
   function startEdit(n: PortfolioNote) {
     setConfirmId(null);
-    setEditId(n.id); setEditText(n.text); setEditTicker(n.ticker ?? '');
+    setEditId(n.id); setEditText(n.text); setEditTicker(n.ticker ?? ''); setEditRemind(isoToLocalInput(n.remind_at));
   }
 
   async function commitEdit() {
@@ -275,7 +305,14 @@ function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers:
     const trimmed = editText.trim();
     setEditId(null);
     if (!trimmed) return; // empty: abandon edit, keep original
-    try { await call('PATCH', { id, text: trimmed, ticker: editTicker.trim() || null }); load(); }
+    const orig = notes.find(n => n.id === id);
+    const remindIso = localInputToIso(editRemind);
+    const body: { id: number; text: string; ticker: string | null; remind_at?: string | null } =
+      { id, text: trimmed, ticker: editTicker.trim() || null };
+    // Only send remind_at when it actually changed — sending it re-arms a
+    // delivered reminder (clears notified_at), so we avoid re-firing on a text edit.
+    if (remindIso !== (orig?.remind_at ?? null)) body.remind_at = remindIso;
+    try { await call('PATCH', body); load(); }
     catch (e) { setErr((e as Error).message); }
   }
 
@@ -320,14 +357,27 @@ function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers:
           <input autoFocus value={editText} onChange={e => setEditText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') setEditId(null); }}
             className="flex-1 min-w-[160px] rounded border border-blue-400 px-1.5 py-0.5 text-sm focus:outline-none" />
+          <input type="datetime-local" value={editRemind} onChange={e => setEditRemind(e.target.value)}
+            title="Reminder time (clear to remove)" aria-label="Reminder time"
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-600 focus:border-blue-500 focus:outline-none" />
         </div>
       ) : (
         <>
-          <button onClick={() => startEdit(n)} className="flex flex-1 items-start gap-2 text-left" title="Click to edit">
-            {n.ticker && (
-              <span className="mt-0.5 shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">{n.ticker}</span>
-            )}
-            <span className={`text-sm ${n.done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{n.text}</span>
+          <button onClick={() => startEdit(n)} className="flex flex-1 flex-col items-start gap-0.5 text-left" title="Click to edit">
+            <span className="flex items-start gap-2">
+              {n.ticker && (
+                <span className="mt-0.5 shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">{n.ticker}</span>
+              )}
+              <span className={`text-sm ${n.done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{n.text}</span>
+            </span>
+            {n.remind_at && !n.done && (() => {
+              const meta = remindMeta(n);
+              return (
+                <span className={`flex items-center gap-1 text-[10px] ${meta.cls}`}>
+                  🔔 {formatRemind(n.remind_at)}{meta.suffix}
+                </span>
+              );
+            })()}
           </button>
           <button onClick={() => remove(n.id)} className="text-gray-300 hover:text-red-500" title="Delete" aria-label={`Delete note "${n.text}"`}>×</button>
         </>
@@ -354,6 +404,9 @@ function NotesPanel({ portfolio, tickers }: { portfolio: NotePortfolio; tickers:
         <input value={text} onChange={e => setText(e.target.value)}
           placeholder="What do you plan to do? e.g. Close higher, recycle into META"
           className="flex-1 min-w-[200px] rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none" />
+        <input type="datetime-local" value={remindAt} onChange={e => setRemindAt(e.target.value)}
+          title="Optional reminder — get a Telegram ping at this time" aria-label="Reminder time (optional)"
+          className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-600 focus:border-blue-500 focus:outline-none" />
         <button type="submit" disabled={busy}
           className="rounded-md bg-gray-900 px-3 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50">
           {busy ? 'Adding…' : 'Add'}

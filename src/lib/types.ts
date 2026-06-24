@@ -230,6 +230,8 @@ export interface PortfolioNote {
   ticker: string | null;  // optional associated ticker, e.g. 'AAPL'
   text: string;
   done: boolean;
+  remind_at: string | null;   // ISO 8601 UTC; set => this item is a reminder
+  notified_at: string | null; // ISO 8601 UTC; set => Telegram push already sent
   created_at: string;
   updated_at: string;
 }

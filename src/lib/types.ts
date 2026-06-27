@@ -191,6 +191,49 @@ export interface WatchlistItem {
   added_at: string;
 }
 
+export type ThesisRole = 'compounder' | 'trade' | 'speculative';
+
+// Auto triggers self-evaluate; price/trend ones use the live quote, fundamental
+// ones read the latest daily_summary.
+export type ThesisTriggerMetric =
+  | 'below_50d' // close under the 50-day average
+  | 'below_200d' // close under the 200-day average (trend break)
+  | 'price_below' // close under a set price (param)
+  | 'eps_revisions_down' // forward EPS revisions net negative
+  | 'earnings_miss' // last reported quarter missed
+  | 'analyst_downgrade'; // a recent analyst downgrade
+
+export interface ThesisTrigger {
+  id: string;
+  text: string; // human description shown on the card
+  kind: 'auto' | 'manual';
+  metric?: ThesisTriggerMetric; // set when kind === 'auto'
+  param?: number | null; // threshold for price_below
+  fired?: boolean; // user-set state for kind === 'manual'
+}
+
+export interface Thesis {
+  ticker: string;
+  role: ThesisRole | null;
+  thesis: string | null;
+  target_weight: number | null;
+  triggers: ThesisTrigger[];
+  updated_at: string;
+}
+
+// A trigger plus whether it has fired right now.
+export interface EvaluatedTrigger extends ThesisTrigger {
+  fired: boolean;
+  evaluatable: boolean; // false for manual, or when the data is missing
+  detail: string | null; // short evidence string, e.g. "$112 < 200d $140"
+}
+
+export interface ThesisEvaluated extends Thesis {
+  evaluated: EvaluatedTrigger[];
+  firedCount: number;
+  triggerCount: number;
+}
+
 export type BuySignal = 'strong_buy' | 'buy' | 'watch' | 'avoid' | 'hold' | 'none';
 export type TrendState = 'uptrend' | 'downtrend' | 'neutral' | 'unknown';
 export type ThesisState = 'improving' | 'stable' | 'weakening' | 'unknown';

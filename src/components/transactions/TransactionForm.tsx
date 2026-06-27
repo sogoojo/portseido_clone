@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAccounts, useTickers } from '@/lib/hooks';
 import TickerCombobox from './TickerCombobox';
-import type { Transaction, TransactionType } from '@/lib/types';
+import type { Transaction, TransactionType, ThesisEvaluated } from '@/lib/types';
 
 interface TransactionFormProps {
   transaction?: Transaction | null;
@@ -33,6 +33,32 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
   const [notes, setNotes] = useState(transaction?.notes || '');
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Sell-discipline gate: if you're selling a name with a written thesis and no
+  // trigger has fired, make you confirm you're acting against your own rule.
+  const [sellThesis, setSellThesis] = useState<ThesisEvaluated | null>(null);
+  const [ackSell, setAckSell] = useState(false);
+
+  useEffect(() => {
+    setAckSell(false);
+    if (type !== 'sell' || !ticker) {
+      setSellThesis(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/theses?ticker=${encodeURIComponent(ticker.toUpperCase())}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled) setSellThesis((j?.data as ThesisEvaluated) ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setSellThesis(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [type, ticker]);
+
+  const sellAgainstThesis = type === 'sell' && !!sellThesis && sellThesis.firedCount === 0;
 
   // Auto-fill currency from the pre-selected account once accounts load
   useEffect(() => {
@@ -82,6 +108,10 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
     const errs = validate();
     if (errs.length > 0) {
       setErrors(errs);
+      return;
+    }
+    if (sellAgainstThesis && !ackSell) {
+      setErrors(['This sells against your thesis — no sell trigger has fired. Confirm below to proceed.']);
       return;
     }
     setErrors([]);
@@ -292,6 +322,45 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
+
+          {/* Sell-discipline gate */}
+          {type === 'sell' && sellThesis && (
+            <div
+              className={`rounded-md border p-3 text-xs ${
+                sellThesis.firedCount > 0
+                  ? 'border-amber-200 bg-amber-50 text-amber-800'
+                  : 'border-red-200 bg-red-50 text-red-800'
+              }`}
+            >
+              <p className="font-semibold">
+                {ticker.toUpperCase()} has a thesis — {sellThesis.firedCount} of {sellThesis.triggerCount} sell
+                trigger{sellThesis.triggerCount !== 1 ? 's' : ''} fired.
+              </p>
+              {sellThesis.firedCount > 0 ? (
+                <ul className="mt-1 list-disc pl-4">
+                  {sellThesis.evaluated
+                    .filter((t) => t.fired)
+                    .map((t) => (
+                      <li key={t.id}>
+                        {t.text}
+                        {t.detail ? ` · ${t.detail}` : ''}
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <>
+                  <p className="mt-1">
+                    None of your pre-committed triggers have fired — the trend/fundamentals still
+                    back the thesis. Selling now is a discretionary call, not a rule.
+                  </p>
+                  <label className="mt-2 flex items-center gap-2 font-medium">
+                    <input type="checkbox" checked={ackSell} onChange={(e) => setAckSell(e.target.checked)} />
+                    I&apos;m selling against my thesis anyway
+                  </label>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Submit */}
           <div className="flex justify-end gap-3 pt-2">

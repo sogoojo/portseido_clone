@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDailySummaries } from '@/lib/services/summaries';
+import { refreshRotationUniverse } from '@/lib/services/rotation';
 
-export const maxDuration = 120;
+// Summaries + the Radar universe's end-of-day price pull share this run; the
+// first invocation also backfills history, so allow extra headroom.
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const secret = request.headers.get('x-cron-secret');
@@ -34,7 +37,21 @@ export async function POST(request: NextRequest) {
         { status: 502 }
       );
     }
-    return NextResponse.json({ data: result });
+
+    // Append today's end-of-day bars for the Radar universe (sector/theme ETFs,
+    // baskets, holdings). Best-effort: a failure here must not fail the summaries
+    // run. Skipped on historical (?date=) backfills.
+    let rotation: { universe: number; refreshed: number } | { error: string } | null = null;
+    if (!dateParam) {
+      try {
+        rotation = await refreshRotationUniverse();
+      } catch (err) {
+        rotation = { error: (err as Error).message };
+        console.error('[Cron/daily-summaries] Rotation refresh failed:', err);
+      }
+    }
+
+    return NextResponse.json({ data: { ...result, rotation } });
   } catch (err) {
     console.error('[Cron/daily-summaries] Error:', err);
     return NextResponse.json(

@@ -136,8 +136,7 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
                 <td className="px-2 font-medium text-gray-900" title={r.name || undefined}>{displayTicker}</td>
                 <td className="px-2 text-right tabular-nums text-gray-700">{money(r.price, r.currency)}</td>
                 <td className="px-2 text-right tabular-nums text-gray-700">
-                  {money(r.effective_target, r.currency)}
-                  {r.target_basis === 'fixed' && <span className="ml-1 text-[9px] text-amber-500" title="No dynamic inputs — using your manual anchor">fix</span>}
+                  {money(r.dynamic_target, r.currency)}
                 </td>
                 <td className="px-2 text-right tabular-nums text-gray-400">
                   {editing === r.ticker ? (
@@ -157,13 +156,16 @@ function WatchlistTable({ rows, onRemove, onUpdateAnchor, variant = 'global' }: 
                       aria-label={`Anchor price for ${r.ticker}`}
                     />
                   ) : (
-                    <button
-                      onClick={() => startEdit(r)}
-                      className="rounded px-1 py-0.5 hover:bg-blue-50 hover:text-blue-600"
-                      title="Click to edit anchor (empty = clear)"
-                    >
-                      {money(r.target_entry, r.currency)}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => startEdit(r)}
+                        className="rounded px-1 py-0.5 hover:bg-blue-50 hover:text-blue-600"
+                        title="Click to edit anchor (empty = clear)"
+                      >
+                        {money(r.target_entry, r.currency)}
+                      </button>
+                      {r.target_basis === 'fixed' && <span className="ml-1 text-[9px] text-amber-500" title="Distance is measured from this anchor, not the fair-entry blend">●</span>}
+                    </>
                   )}
                 </td>
                 <td className={`px-2 text-right tabular-nums font-medium ${r.distance == null ? 'text-gray-400' : r.distance >= 0 ? 'text-green-600' : 'text-gray-500'}`}>

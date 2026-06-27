@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import type { DailySummary, NewsArticle } from '@/lib/types';
+import type { DailySummary, NewsArticle, ThesisEvaluated } from '@/lib/types';
 import SentimentTrends from '@/components/summaries/SentimentTrends';
+import ThesisCard from '@/components/summaries/ThesisCard';
 import { useApi } from '@/lib/hooks';
 
 type Sentiment = 'negative' | 'neutral' | 'positive' | 'none';
@@ -162,7 +163,17 @@ function NewsItem({ article }: { article: NewsArticle }) {
   );
 }
 
-function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment: Sentiment }) {
+function SummaryCard({
+  summary,
+  sentiment,
+  thesis,
+  onThesisChanged,
+}: {
+  summary: DailySummary;
+  sentiment: Sentiment;
+  thesis: ThesisEvaluated | null;
+  onThesisChanged: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const isPositive = (summary.change_pct ?? 0) >= 0;
   const styles = SENTIMENT_STYLES[sentiment];
@@ -269,6 +280,13 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
           )}
         </div>
       )}
+
+      <ThesisCard
+        ticker={summary.ticker}
+        thesis={thesis}
+        currentPrice={summary.close}
+        onChanged={onThesisChanged}
+      />
     </div>
   );
 }
@@ -276,6 +294,15 @@ function SummaryCard({ summary, sentiment }: { summary: DailySummary; sentiment:
 export default function SummariesPage() {
   const [ticker, setTicker] = useState('');
   const [date, setDate] = useState('');
+  // Bumped after a thesis is saved/deleted to force a re-fetch of theses.
+  const [thesisVersion, setThesisVersion] = useState(0);
+
+  const { data: thesisBody } = useApi<{ data: ThesisEvaluated[] }>(`/api/theses?v=${thesisVersion}`);
+  const thesisByTicker = useMemo(() => {
+    const m = new Map<string, ThesisEvaluated>();
+    (thesisBody?.data ?? []).forEach((t) => m.set(t.ticker, t));
+    return m;
+  }, [thesisBody]);
 
   const url = useMemo(() => {
     const params = new URLSearchParams();
@@ -374,6 +401,8 @@ export default function SummariesPage() {
               key={`${summary.ticker}-${summary.date}`}
               summary={summary}
               sentiment={sentiment}
+              thesis={thesisByTicker.get(summary.ticker) ?? null}
+              onThesisChanged={() => setThesisVersion((v) => v + 1)}
             />
           ))}
         </div>

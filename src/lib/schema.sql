@@ -135,3 +135,17 @@ CREATE TABLE IF NOT EXISTS portfolio_notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_notes_portfolio ON portfolio_notes(portfolio);
+
+-- Per-holding investment thesis + pre-committed sell triggers. The discipline
+-- layer that stops selling an intact winner on a narrative: you only sell when
+-- a trigger you wrote in advance actually fires. `triggers` is a JSON array of
+-- ThesisTrigger; `auto` triggers self-evaluate against price/trend +
+-- daily_summaries (revisions, downgrades, earnings miss), `manual` ones you tick.
+CREATE TABLE IF NOT EXISTS theses (
+  ticker TEXT PRIMARY KEY,
+  role TEXT,                            -- compounder | trade | speculative
+  thesis TEXT,                          -- the bull case (why you own it)
+  target_weight REAL,                   -- optional target % of portfolio
+  triggers TEXT NOT NULL DEFAULT '[]',  -- JSON: ThesisTrigger[]
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

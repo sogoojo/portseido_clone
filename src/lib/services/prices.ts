@@ -342,18 +342,25 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
     return cachedRows;
   }
 
-  // Fetch from Yahoo Finance
+  // Fetch from Yahoo Finance. Use chart() rather than the deprecated
+  // historical(): the latter throws ("SOME (but not all) null values") on any
+  // Yahoo response containing gap rows, which silently broke all backfill.
   try {
-    const history = await yahooFinance.historical(yahooSymbol(ticker), {
+    const chart = await yahooFinance.chart(yahooSymbol(ticker), {
       period1: from,
       period2: to,
+      interval: '1d',
     });
+    // Drop gap rows (holidays/halts) that carry a null close.
+    const quotes = (chart?.quotes ?? []).filter((q) => q.date && q.close != null);
 
-    // Get currency from metadata or quote
+    // Get currency from metadata, falling back to the chart's own meta
     let currency = 'USD';
     const meta = db.prepare('SELECT currency FROM ticker_metadata WHERE ticker = ?').get(ticker) as { currency: string } | undefined;
     if (meta?.currency) {
       currency = meta.currency;
+    } else if (chart?.meta?.currency) {
+      currency = chart.meta.currency;
     }
 
     const rows: HistoricalPriceRow[] = [];
@@ -362,7 +369,7 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
     const hasTodayQuote = !!getCachedPrice(ticker, todayStr);
 
     const insertBatch = db.transaction(() => {
-      for (const row of history) {
+      for (const row of quotes) {
         const dateStr = row.date.toISOString().split('T')[0];
         // Don't clobber today's quote row — it carries change/52wk fields the
         // historical feed lacks, and the upsert would null them out
@@ -371,7 +378,7 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
             open: row.open,
             high: row.high,
             low: row.low,
-            close: row.close,
+            close: row.close as number,
             currency,
           });
         }
@@ -380,14 +387,14 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
           open: row.open,
           high: row.high,
           low: row.low,
-          close: row.close,
+          close: row.close as number,
           currency,
         });
       }
     });
     insertBatch();
 
-    return rows;
+    return rows.length > 0 ? rows : cachedRows;
   } catch (err) {
     console.error(`[PriceService] Error fetching historical for ${ticker}:`, err);
     return cachedRows; // Return whatever we have cached

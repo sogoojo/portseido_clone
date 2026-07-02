@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDailySummaries } from '@/lib/services/summaries';
 import { refreshRotationUniverse } from '@/lib/services/rotation';
+import { checkAndApplySplits, type SplitCheckResult } from '@/lib/services/splits';
 
 // Summaries + the Radar universe's end-of-day price pull share this run; the
 // first invocation also backfills history, so allow extra headroom.
@@ -26,6 +27,19 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // Restate any fresh stock splits BEFORE summarising, so today's summary
+    // rows land in post-split terms. Best-effort: a Yahoo hiccup here must not
+    // block the summaries run. Skipped on historical (?date=) backfills.
+    let splits: SplitCheckResult | { error: string } | null = null;
+    if (!dateParam) {
+      try {
+        splits = await checkAndApplySplits();
+      } catch (err) {
+        splits = { error: (err as Error).message };
+        console.error('[Cron/daily-summaries] Split check failed:', err);
+      }
+    }
+
     const result = await runDailySummaries(dateParam || undefined);
     // Zero successes with tickers to process means the whole run failed
     // (Yahoo down, or a delayed cron tripping the freshness guard on every
@@ -51,7 +65,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ data: { ...result, rotation } });
+    return NextResponse.json({ data: { ...result, rotation, splits } });
   } catch (err) {
     console.error('[Cron/daily-summaries] Error:', err);
     return NextResponse.json(

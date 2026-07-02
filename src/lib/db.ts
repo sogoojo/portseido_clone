@@ -86,6 +86,12 @@ const dataMigrations: { name: string; sql: string }[] = [
     name: 'track-cash-defaults',
     sql: `UPDATE accounts SET track_cash = 0 WHERE id IN ('trading212', 'degiro', 'morgan-stanley', 'crypto', 'ngx')`,
   },
+  {
+    // CRWD's 4:1 split (2026-07-02) was restated by hand before auto-detection
+    // existed — record it so the split checker doesn't apply it a second time
+    name: 'crwd-split-2026-07-02-already-applied',
+    sql: `INSERT OR IGNORE INTO applied_splits (ticker, split_date, numerator, denominator) VALUES ('CRWD', '2026-07-02', 4, 1)`,
+  },
 ];
 const isApplied = db.prepare('SELECT 1 FROM _migrations WHERE name = ?');
 const markApplied = db.prepare('INSERT INTO _migrations (name) VALUES (?)');

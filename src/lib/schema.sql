@@ -149,3 +149,20 @@ CREATE TABLE IF NOT EXISTS theses (
   triggers TEXT NOT NULL DEFAULT '[]',  -- JSON: ThesisTrigger[]
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Stock splits already applied to stored data (auto-detected from Yahoo split
+-- events). Rows here guard against applying the same split twice.
+CREATE TABLE IF NOT EXISTS applied_splits (
+  ticker TEXT NOT NULL,
+  split_date DATE NOT NULL,     -- effective date; rows dated before it get restated
+  numerator REAL NOT NULL,      -- 4:1 split -> numerator 4, denominator 1
+  denominator REAL NOT NULL,
+  applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (ticker, split_date)
+);
+
+-- Tiny key/value store for app state (e.g. split-check throttle timestamp)
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);

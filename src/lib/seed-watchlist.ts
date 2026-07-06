@@ -90,7 +90,8 @@ export function seedNgxWatchlist(db: BetterSqlite3.Database): void {
   );
   const tx = db.transaction(() => {
     for (const w of NGX_WATCHLIST) insert.run(w.ticker, w.name);
-    db.prepare(`INSERT INTO _migrations (name) VALUES ('seed-ngx-watchlist')`).run();
+    // OR IGNORE: two processes can race past the applied-check on a fresh DB
+    db.prepare(`INSERT OR IGNORE INTO _migrations (name) VALUES ('seed-ngx-watchlist')`).run();
   });
   tx();
 }

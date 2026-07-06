@@ -106,7 +106,10 @@ const dataMigrations: { name: string; sql: string }[] = [
   },
 ];
 const isApplied = db.prepare('SELECT 1 FROM _migrations WHERE name = ?');
-const markApplied = db.prepare('INSERT INTO _migrations (name) VALUES (?)');
+// OR IGNORE: parallel processes (e.g. next build page-data workers) can race
+// on a fresh DB — each migration's SQL is idempotent, so a double run is
+// harmless but a UNIQUE violation here would crash module init
+const markApplied = db.prepare('INSERT OR IGNORE INTO _migrations (name) VALUES (?)');
 for (const m of dataMigrations) {
   if (isApplied.get(m.name)) continue;
   db.transaction(() => {

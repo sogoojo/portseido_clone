@@ -13,7 +13,9 @@ export function seedAccounts(db: Database.Database) {
   const count = db.prepare('SELECT COUNT(*) as count FROM accounts').get() as { count: number };
   if (count.count > 0) return;
 
-  const insert = db.prepare('INSERT INTO accounts (id, name, broker, currency, track_cash) VALUES (?, ?, ?, ?, ?)');
+  // OR IGNORE: parallel processes (e.g. next build workers) can both pass the
+  // count guard on a fresh DB — the second insert must not crash module init
+  const insert = db.prepare('INSERT OR IGNORE INTO accounts (id, name, broker, currency, track_cash) VALUES (?, ?, ?, ?, ?)');
   const run = db.transaction(() => {
     for (const a of SEED_ACCOUNTS) {
       insert.run(a.id, a.name, a.broker, a.currency, a.track_cash);

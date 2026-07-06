@@ -63,6 +63,7 @@ export const THEMES: ThemeDef[] = [
 const BENCHMARK = 'SPY';
 
 // Trading-day windows (~21 per month)
+const W1D = 1; // today's move: last close vs previous close
 const W5 = 5;
 const W1 = 21;
 const W3 = 63;
@@ -185,6 +186,7 @@ export async function refreshRotationUniverse(): Promise<{ universe: number; ref
 /** Per-stock breakdown shown when a theme row is expanded. */
 export interface Constituent {
   ticker: string;
+  ret_1d: number | null;
   ret_5d: number | null;
   ret_1m: number | null;
   ret_3m: number | null;
@@ -200,6 +202,7 @@ export interface ThemeRotation {
   group: ThemeGroup;
   kind: ThemeKind;
   members: string[];
+  ret_1d: number | null;
   ret_5d: number | null;
   ret_1m: number | null;
   ret_3m: number | null;
@@ -223,6 +226,7 @@ interface SpyReturns {
 
 /** Per-stock stats for the drill-down, same lens as the theme row. */
 function memberStat(ticker: string, closes: number[], spy: SpyReturns): Constituent {
+  const ret_1d = retDaysAgo(closes, W1D);
   const ret_5d = retDaysAgo(closes, W5);
   const ret_1m = retDaysAgo(closes, W1);
   const ret_3m = retDaysAgo(closes, W3);
@@ -233,7 +237,7 @@ function memberStat(ticker: string, closes: number[], spy: SpyReturns): Constitu
   const rs_3m = rs(ret_3m, spy.d3);
   const rs_6m = rs(ret_6m, spy.d6);
   const score = 0.3 * (rs_1m ?? 0) + 0.5 * (rs_3m ?? 0) + 0.2 * (rs_6m ?? 0);
-  return { ticker, ret_5d, ret_1m, ret_3m, ret_6m, rs_3m, ext50, stage: stageOf(score, ext50) };
+  return { ticker, ret_1d, ret_5d, ret_1m, ret_3m, ret_6m, rs_3m, ext50, stage: stageOf(score, ext50) };
 }
 
 export async function computeRotation(): Promise<ThemeRotation[]> {
@@ -256,6 +260,7 @@ export async function computeRotation(): Promise<ThemeRotation[]> {
       .map((m) => memberStat(m, closes.get(m) ?? [], spyR))
       .sort((a, b) => (b.rs_3m ?? -Infinity) - (a.rs_3m ?? -Infinity));
 
+    const ret_1d = avg(aggStats.map((s) => s.ret_1d));
     const ret_5d = avg(aggStats.map((s) => s.ret_5d));
     const ret_1m = avg(aggStats.map((s) => s.ret_1m));
     const ret_3m = avg(aggStats.map((s) => s.ret_3m));
@@ -277,6 +282,7 @@ export async function computeRotation(): Promise<ThemeRotation[]> {
       group: t.group,
       kind: t.kind,
       members: t.members,
+      ret_1d,
       ret_5d,
       ret_1m,
       ret_3m,

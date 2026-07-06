@@ -31,6 +31,9 @@ function ConstituentTable({ rows }: { rows: Constituent[] }) {
       <thead>
         <tr className="text-gray-400">
           <th className="px-2 py-1 text-left font-medium">Stock</th>
+          <th className="px-2 py-1 text-right font-medium" title="Today's move (last close vs previous)">
+            1D
+          </th>
           <th className="px-2 py-1 text-right font-medium">5D</th>
           <th className="px-2 py-1 text-right font-medium">1M</th>
           <th className="px-2 py-1 text-right font-medium">3M</th>
@@ -46,6 +49,7 @@ function ConstituentTable({ rows }: { rows: Constituent[] }) {
         {rows.map((c) => (
           <tr key={c.ticker} className="border-t border-gray-100">
             <td className="px-2 py-1 font-medium text-gray-800">{c.ticker}</td>
+            <td className={`px-2 py-1 text-right tabular-nums ${heat(c.ret_1d)}`}>{pct(c.ret_1d, true)}</td>
             <td className={`px-2 py-1 text-right tabular-nums ${heat(c.ret_5d)}`}>{pct(c.ret_5d, true)}</td>
             <td className={`px-2 py-1 text-right tabular-nums ${heat(c.ret_1m)}`}>{pct(c.ret_1m, true)}</td>
             <td className={`px-2 py-1 text-right tabular-nums ${heat(c.ret_3m)}`}>{pct(c.ret_3m, true)}</td>
@@ -90,6 +94,9 @@ export default function RotationHeatmap({ themes }: { themes: ThemeRotation[] })
           <thead>
             <tr className="border-b border-gray-100 text-xs text-gray-500">
               <th className="px-4 py-2 text-left font-medium">Theme</th>
+              <th className="px-3 py-2 text-right font-medium" title="Today's move (last close vs previous)">
+                1D
+              </th>
               <th className="px-3 py-2 text-right font-medium">5D</th>
               <th className="px-3 py-2 text-right font-medium">1M</th>
               <th className="px-3 py-2 text-right font-medium">3M</th>
@@ -128,6 +135,7 @@ export default function RotationHeatmap({ themes }: { themes: ThemeRotation[] })
                         {t.members.join(', ')}
                       </div>
                     </td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${heat(t.ret_1d)}`}>{pct(t.ret_1d, true)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${heat(t.ret_5d)}`}>{pct(t.ret_5d, true)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${heat(t.ret_1m)}`}>{pct(t.ret_1m, true)}</td>
                     <td className={`px-3 py-2 text-right tabular-nums ${heat(t.ret_3m)}`}>{pct(t.ret_3m, true)}</td>
@@ -156,7 +164,7 @@ export default function RotationHeatmap({ themes }: { themes: ThemeRotation[] })
                   </tr>
                   {expandable && isOpen && (
                     <tr>
-                      <td colSpan={8} className="bg-gray-50 px-4 py-2">
+                      <td colSpan={9} className="bg-gray-50 px-4 py-2">
                         <ConstituentTable rows={t.constituents} />
                       </td>
                     </tr>

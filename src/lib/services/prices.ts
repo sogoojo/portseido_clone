@@ -289,6 +289,22 @@ export interface HistoricalPriceRow {
   currency: string;
 }
 
+// A fetched series that starts >7 days after the requested start means the
+// instrument simply has no earlier data (IPO/listing). Persist that so future
+// cache checks don't demand coverage the source can never provide — without
+// this, every valuation request re-fetched such tickers from Yahoo forever.
+function recordHistoryStart(ticker: string, requestedFrom: string, firstDataDate: string): void {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  if ((Date.parse(firstDataDate) - Date.parse(requestedFrom)) / DAY_MS <= 7) return;
+  db.prepare(
+    `INSERT INTO ticker_metadata (ticker, history_start) VALUES (?, ?)
+     ON CONFLICT(ticker) DO UPDATE SET
+       history_start = CASE
+         WHEN history_start IS NULL OR excluded.history_start < history_start
+         THEN excluded.history_start ELSE history_start END`
+  ).run(ticker, firstDataDate);
+}
+
 export async function getHistoricalPrices(ticker: string, from: Date, to: Date): Promise<HistoricalPriceRow[]> {
   // Check if we have cached data for the range
   const fromStr = from.toISOString().split('T')[0];
@@ -300,11 +316,16 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
 
   // Trust the cache only if it actually covers the requested range. A single
   // row (e.g. today's quote, written by getCurrentPrice into the same table)
-  // must not short-circuit a 1Y fetch.
+  // must not short-circuit a 1Y fetch. Coverage is measured from the series'
+  // known start (IPO/listing date), not the requested start — data that never
+  // existed can't be a gap.
   const DAY_MS = 24 * 60 * 60 * 1000;
-  const spanDays = Math.max(1, Math.round((to.getTime() - from.getTime()) / DAY_MS));
+  const known = db.prepare('SELECT history_start FROM ticker_metadata WHERE ticker = ?')
+    .get(ticker) as { history_start: string | null } | undefined;
+  const effectiveFrom = known?.history_start && known.history_start > fromStr ? known.history_start : fromStr;
+  const spanDays = Math.max(1, Math.round((Date.parse(toStr) - Date.parse(effectiveFrom)) / DAY_MS));
   if (cachedRows.length > 0) {
-    const startGapDays = (Date.parse(cachedRows[0].date) - Date.parse(fromStr)) / DAY_MS;
+    const startGapDays = (Date.parse(cachedRows[0].date) - Date.parse(effectiveFrom)) / DAY_MS;
     const endGapDays = (Date.parse(toStr) - Date.parse(cachedRows[cachedRows.length - 1].date)) / DAY_MS;
     // ~0.68 of calendar days are trading days; 0.4 leaves margin for holidays
     const denseEnough = spanDays <= 7 || cachedRows.length >= Math.floor(spanDays * 0.4);
@@ -318,6 +339,9 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
     const bars = Math.min(spanDays + 10, 1500);
     const tv = await fetchTvDailyCandles(tvSymbol(ticker), bars, 20000);
     if (tv) {
+      // TradingView caps how far back candles go — treat the first candle as
+      // the series start so we stop re-requesting a range it can't serve
+      if (tv.candles.length > 0) recordHistoryStart(ticker, effectiveFrom, tv.candles[0].date);
       const currency = tv.currency || 'NGN';
       const todayStr = new Date().toISOString().split('T')[0];
       const hasTodayQuote = !!getCachedPrice(tvSymbol(ticker), todayStr);
@@ -353,6 +377,9 @@ export async function getHistoricalPrices(ticker: string, from: Date, to: Date):
     });
     // Drop gap rows (holidays/halts) that carry a null close.
     const quotes = (chart?.quotes ?? []).filter((q) => q.date && q.close != null);
+    if (quotes.length > 0) {
+      recordHistoryStart(ticker, effectiveFrom, quotes[0].date.toISOString().split('T')[0]);
+    }
 
     // Get currency from metadata, falling back to the chart's own meta
     let currency = 'USD';

@@ -266,6 +266,8 @@ export interface TargetRow {
 
 export type NotePortfolio = 'global' | 'ngx';
 
+export type TriggerDirection = 'above' | 'below';
+
 /** A free-form action item / plan shown under a watchlist portfolio section. */
 export interface PortfolioNote {
   id: number;
@@ -274,6 +276,8 @@ export interface PortfolioNote {
   text: string;
   done: boolean;
   remind_at: string | null;   // ISO 8601 UTC; set => this item is a reminder
+  trigger_price: number | null;               // price alert level in the ticker's native currency
+  trigger_direction: TriggerDirection | null; // fire when price is at/above or at/below trigger_price
   notified_at: string | null; // ISO 8601 UTC; set => Telegram push already sent
   created_at: string;
   updated_at: string;

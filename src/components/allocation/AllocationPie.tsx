@@ -54,10 +54,10 @@ const RADIAN = Math.PI / 180;
 
 // Chart geometry — labels are laid out against these constants, so they and
 // the <Pie> props must stay in sync
-const CHART_HEIGHT = 420;
+const CHART_HEIGHT = 475;
 const CHART_CY = CHART_HEIGHT / 2;
-const INNER_RADIUS = 82;
-const OUTER_RADIUS = 116;
+const INNER_RADIUS = 93;
+const OUTER_RADIUS = 131;
 const LABEL_RING = OUTER_RADIUS + 24; // labels live on this ring outside the donut
 const LABEL_MIN_PCT = 0.8; // label almost every slice, like Portseido
 const LABEL_SPACING = 15; // min vertical px between labels on one side
@@ -290,7 +290,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
             <div className="text-center">
               {hoveredItem ? (
                 <>
-                  <p className="text-xs text-gray-400 truncate max-w-[100px]">{hoveredItem.name}</p>
+                  <p className="text-xs text-gray-400 truncate max-w-[120px]">{hoveredItem.name}</p>
                   <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(hoveredItem.value, currency)}</p>
                   <p className="text-xs tabular-nums text-gray-500">{hoveredItem.pct.toFixed(1)}%</p>
                 </>

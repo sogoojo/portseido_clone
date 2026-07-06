@@ -120,8 +120,11 @@ CREATE TABLE IF NOT EXISTS targets (
 
 -- Free-form action items / plans shown under each watchlist portfolio section.
 -- portfolio is 'global' | 'ngx'; ticker is an optional association (e.g. 'AAPL').
--- remind_at (ISO 8601 UTC) optionally turns an item into a reminder; notified_at
--- is stamped (ISO 8601 UTC) once a Telegram push has gone out, so it fires once.
+-- remind_at (ISO 8601 UTC) optionally turns an item into a reminder; a price
+-- trigger (trigger_price + trigger_direction, requires ticker) fires when the
+-- ticker's price crosses the level in its native currency. notified_at is
+-- stamped (ISO 8601 UTC) once a Telegram push has gone out — one push per item,
+-- whichever condition (time or price) is met first.
 CREATE TABLE IF NOT EXISTS portfolio_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   portfolio TEXT NOT NULL,
@@ -129,6 +132,8 @@ CREATE TABLE IF NOT EXISTS portfolio_notes (
   text TEXT NOT NULL,
   done INTEGER NOT NULL DEFAULT 0,
   remind_at TEXT,
+  trigger_price REAL,
+  trigger_direction TEXT, -- 'above' | 'below'
   notified_at TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

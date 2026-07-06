@@ -69,6 +69,12 @@ const migrations = [
   // notified_at = when a Telegram push went out (null = still pending)
   `ALTER TABLE portfolio_notes ADD COLUMN remind_at TEXT`,
   `ALTER TABLE portfolio_notes ADD COLUMN notified_at TEXT`,
+  // Price-triggered alerts: fire when ticker crosses trigger_price ('above'/'below')
+  `ALTER TABLE portfolio_notes ADD COLUMN trigger_price REAL`,
+  `ALTER TABLE portfolio_notes ADD COLUMN trigger_direction TEXT`,
+  // Earliest date the price source has data for (IPO/listing date) — lets the
+  // historical-price cache check stop re-fetching ranges that predate the series
+  `ALTER TABLE ticker_metadata ADD COLUMN history_start TEXT`,
 ];
 for (const sql of migrations) {
   try {
@@ -91,6 +97,12 @@ const dataMigrations: { name: string; sql: string }[] = [
     // existed — record it so the split checker doesn't apply it a second time
     name: 'crwd-split-2026-07-02-already-applied',
     sql: `INSERT OR IGNORE INTO applied_splits (ticker, split_date, numerator, denominator) VALUES ('CRWD', '2026-07-02', 4, 1)`,
+  },
+  {
+    // Trader Republic funds arrive via transfer only when buying — deposits
+    // don't represent held cash, so cash tracking just shows phantom negatives
+    name: 'trader-republic-no-cash-tracking',
+    sql: `UPDATE accounts SET track_cash = 0 WHERE id = 'trader-republic'`,
   },
 ];
 const isApplied = db.prepare('SELECT 1 FROM _migrations WHERE name = ?');

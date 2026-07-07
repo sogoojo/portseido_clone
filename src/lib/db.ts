@@ -14,27 +14,48 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const db = new Database(DB_PATH);
-
-// Enable WAL mode for better concurrent read performance
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
 // Run schema migration
 const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
-db.exec(schema);
 
-// Migrations
-// Column additions are idempotent via the duplicate-column check below.
-// Data migrations (like the track_cash defaults) must run ONCE — re-running
-// them on every boot would undo later user changes — so they are tracked
-// in the _migrations table.
-db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
-  name TEXT PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-)`);
+// Synchronous sleep (no deps) so the init retry loop below can back off between
+// attempts at module-eval time, where nothing async is available.
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
-const migrations = [
+function isLockError(err: unknown): boolean {
+  return /database is locked|SQLITE_BUSY/i.test((err as Error)?.message ?? '');
+}
+
+/**
+ * Open the connection and bring the schema up to date. Every step here is
+ * idempotent (CREATE TABLE IF NOT EXISTS, duplicate-column-tolerant ALTERs,
+ * OR IGNORE migrations/seeds), so the caller can retry the whole thing on a
+ * lock without side effects. Retrying is what actually fixes the build race:
+ * `next build` runs several page-data workers that each init this fresh DB at
+ * once, and `PRAGMA journal_mode=WAL` / DDL take an exclusive lock that
+ * busy_timeout doesn't reliably cover — but on a retry the pragma is a no-op
+ * once another worker has already switched the file to WAL.
+ */
+function openAndInit(): Database.Database {
+  const conn = new Database(DB_PATH);
+  conn.pragma('journal_mode = WAL');
+  conn.pragma('foreign_keys = ON');
+  conn.pragma('busy_timeout = 20000');
+
+  conn.exec(schema);
+
+  // Migrations
+  // Column additions are idempotent via the duplicate-column check below.
+  // Data migrations (like the track_cash defaults) must run ONCE — re-running
+  // them on every boot would undo later user changes — so they are tracked
+  // in the _migrations table.
+  conn.exec(`CREATE TABLE IF NOT EXISTS _migrations (
+    name TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  const migrations = [
   `ALTER TABLE price_cache ADD COLUMN previous_close REAL`,
   `ALTER TABLE price_cache ADD COLUMN change REAL`,
   `ALTER TABLE price_cache ADD COLUMN change_pct REAL`,
@@ -76,18 +97,18 @@ const migrations = [
   // historical-price cache check stop re-fetching ranges that predate the series
   `ALTER TABLE ticker_metadata ADD COLUMN history_start TEXT`,
 ];
-for (const sql of migrations) {
-  try {
-    db.exec(sql);
-  } catch (err) {
-    // Only an already-applied column addition is expected — anything else is
-    // a real migration failure and must not be silently swallowed
-    if (!/duplicate column name/i.test((err as Error).message)) throw err;
+  for (const sql of migrations) {
+    try {
+      conn.exec(sql);
+    } catch (err) {
+      // Only an already-applied column addition is expected — anything else is
+      // a real migration failure and must not be silently swallowed
+      if (!/duplicate column name/i.test((err as Error).message)) throw err;
+    }
   }
-}
 
-// One-time data migrations
-const dataMigrations: { name: string; sql: string }[] = [
+  // One-time data migrations
+  const dataMigrations: { name: string; sql: string }[] = [
   {
     name: 'track-cash-defaults',
     sql: `UPDATE accounts SET track_cash = 0 WHERE id IN ('trading212', 'degiro', 'morgan-stanley', 'crypto', 'ngx')`,
@@ -105,23 +126,49 @@ const dataMigrations: { name: string; sql: string }[] = [
     sql: `UPDATE accounts SET track_cash = 0 WHERE id = 'trader-republic'`,
   },
 ];
-const isApplied = db.prepare('SELECT 1 FROM _migrations WHERE name = ?');
-// OR IGNORE: parallel processes (e.g. next build page-data workers) can race
-// on a fresh DB — each migration's SQL is idempotent, so a double run is
-// harmless but a UNIQUE violation here would crash module init
-const markApplied = db.prepare('INSERT OR IGNORE INTO _migrations (name) VALUES (?)');
-for (const m of dataMigrations) {
-  if (isApplied.get(m.name)) continue;
-  db.transaction(() => {
-    db.exec(m.sql);
-    markApplied.run(m.name);
-  })();
+  const isApplied = conn.prepare('SELECT 1 FROM _migrations WHERE name = ?');
+  // OR IGNORE: parallel processes (e.g. next build page-data workers) can race
+  // on a fresh DB — each migration's SQL is idempotent, so a double run is
+  // harmless but a UNIQUE violation here would crash module init
+  const markApplied = conn.prepare('INSERT OR IGNORE INTO _migrations (name) VALUES (?)');
+  for (const m of dataMigrations) {
+    if (isApplied.get(m.name)) continue;
+    conn.transaction(() => {
+      conn.exec(m.sql);
+      markApplied.run(m.name);
+    })();
+  }
+
+  // Seed accounts on first connection
+  seedAccounts(conn);
+  seedTargets(conn);
+  seedWatchlist(conn);
+  seedNgxWatchlist(conn);
+
+  return conn;
 }
 
-// Seed accounts on first connection
-seedAccounts(db);
-seedTargets(db);
-seedWatchlist(db);
-seedNgxWatchlist(db);
+// Open with a bounded retry so a lost init race (see openAndInit) recovers
+// instead of crashing the build. All init steps are idempotent, so re-running
+// after closing the half-open connection is safe.
+function connect(): Database.Database {
+  const MAX_ATTEMPTS = 15;
+  for (let attempt = 1; ; attempt++) {
+    let conn: Database.Database | null = null;
+    try {
+      conn = openAndInit();
+      return conn;
+    } catch (err) {
+      try { conn?.close(); } catch { /* ignore */ }
+      if (isLockError(err) && attempt < MAX_ATTEMPTS) {
+        sleepSync(150 + attempt * 100);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+const db = connect();
 
 export default db;

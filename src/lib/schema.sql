@@ -183,3 +183,18 @@ CREATE TABLE IF NOT EXISTS ngx_news (
   published_at TEXT,             -- ISO 8601, or null if the feed omitted it
   fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Valuation fundamentals for NGX stocks from the TradingView scanner endpoint
+-- (the same data their web screener shows; free, keyless). Yahoo has none of
+-- this for NGX, so the scanner is the only free source. Refreshed on a slow
+-- window since these move quarterly, not intraday.
+CREATE TABLE IF NOT EXISTS ngx_fundamentals (
+  ticker TEXT PRIMARY KEY,       -- e.g. 'NSENG:MTNN'
+  pe REAL,                       -- trailing P/E
+  pb REAL,                       -- price / book
+  eps REAL,                      -- trailing EPS (NGN)
+  market_cap REAL,               -- NGN
+  dividend_yield REAL,           -- percent
+  net_margin REAL,               -- percent
+  fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

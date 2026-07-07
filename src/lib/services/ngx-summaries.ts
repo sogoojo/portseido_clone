@@ -2,6 +2,7 @@ import db from '@/lib/db';
 import { getHistoricalPrices, getMultipleCurrentPrices } from '@/lib/services/prices';
 import { retDaysAgo, sma } from '@/lib/services/rotation';
 import { refreshNgxNews, getNgxNewsByTicker } from '@/lib/services/ngx-news';
+import { refreshNgxFundamentals, getNgxFundamentals } from '@/lib/services/ngx-fundamentals';
 import type { NgxSummary } from '@/lib/types';
 
 // Trading-day windows (NGX trades roughly the same ~252 days/year as US markets,
@@ -82,14 +83,14 @@ export async function getNgxSummaries(): Promise<NgxSummary[]> {
   const quotes = await getMultipleCurrentPrices(tickers);
   const quoteByTicker = new Map(quotes.map(q => [q.ticker, q]));
 
-  // Refresh the Nigerian-press feed cache if stale (best-effort — never blocks
-  // the price/momentum data), then match cached headlines to each holding.
-  try {
-    await refreshNgxNews();
-  } catch (err) {
-    console.error('[ngx-summaries] news refresh failed', err);
-  }
+  // Refresh news + fundamentals caches if stale (both best-effort — neither
+  // blocks the price/momentum data), then read them back per ticker.
+  await Promise.allSettled([
+    refreshNgxNews(),
+    refreshNgxFundamentals(tickers),
+  ]);
   const newsByTicker = getNgxNewsByTicker(list);
+  const fundamentals = getNgxFundamentals(tickers);
 
   const to = new Date();
   const from = new Date(to.getTime() - HISTORY_DAYS * 86400000);
@@ -109,6 +110,7 @@ export async function getNgxSummaries(): Promise<NgxSummary[]> {
     const m50 = sma(closes, 50);
     const m200 = sma(closes, 200);
     const last = q?.price ?? (closes.length ? closes[closes.length - 1] : null);
+    const f = fundamentals.get(ticker);
 
     return {
       ticker,
@@ -125,6 +127,12 @@ export async function getNgxSummaries(): Promise<NgxSummary[]> {
       ret_1y: retDaysAgo(closes, W1Y),
       ext50: m50 != null && last != null ? last / m50 - 1 : null,
       above_200d: m200 != null && last != null ? last > m200 : null,
+      pe: f?.pe ?? null,
+      pb: f?.pb ?? null,
+      eps: f?.eps ?? null,
+      market_cap: f?.market_cap ?? null,
+      dividend_yield: f?.dividend_yield ?? null,
+      net_margin: f?.net_margin ?? null,
       news: newsByTicker.get(ticker) ?? [],
       stale: q?.stale ?? closes.length === 0,
       warning: q?.warning,

@@ -285,6 +285,14 @@ export interface NgxSummary {
   ret_1y: number | null;
   ext50: number | null;         // close / 50-day MA - 1 (trend stretch)
   above_200d: boolean | null;   // close above its 200-day MA (long-term uptrend)
+  // Valuation fundamentals from the TradingView scanner (free, keyless). Any
+  // field can be null when the source lacks it for that name.
+  pe: number | null;            // trailing P/E
+  pb: number | null;            // price / book
+  eps: number | null;           // trailing EPS, in NGN
+  market_cap: number | null;    // in NGN
+  dividend_yield: number | null;// percent
+  net_margin: number | null;    // percent
   news: NewsArticle[];          // matched Nigerian-press headlines (may be empty)
   stale: boolean;               // true when no fresh price could be loaded
   warning?: string;

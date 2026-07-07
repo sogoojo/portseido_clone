@@ -34,6 +34,32 @@ function symbolOf(ticker: string): string {
   return ticker.startsWith('NSENG:') ? ticker.slice('NSENG:'.length) : ticker;
 }
 
+// Compact ₦ market cap, e.g. 15746700000000 → "₦15.7T".
+function formatCap(value: number | null): string | null {
+  if (value == null) return null;
+  if (value >= 1e12) return `₦${(value / 1e12).toFixed(1)}T`;
+  if (value >= 1e9) return `₦${(value / 1e9).toFixed(1)}B`;
+  if (value >= 1e6) return `₦${(value / 1e6).toFixed(1)}M`;
+  return `₦${value.toFixed(0)}`;
+}
+
+function Metric({ label, value }: { label: string; value: string | null }) {
+  if (value == null) return null;
+  return (
+    <span className="text-gray-500">
+      {label} <b className="tabular-nums text-gray-700">{value}</b>
+    </span>
+  );
+}
+
+// One-decimal number, or null so the metric is skipped.
+function num1(value: number | null): string | null {
+  return value == null ? null : value.toFixed(1);
+}
+function pct1(value: number | null): string | null {
+  return value == null ? null : `${value.toFixed(1)}%`;
+}
+
 function MomentumChip({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="flex flex-col items-center">
@@ -92,6 +118,17 @@ function NgxCard({ s }: { s: NgxSummary }) {
         <MomentumChip label="1Y" value={s.ret_1y} />
       </div>
 
+      {(s.pe != null || s.dividend_yield != null || s.market_cap != null) && (
+        <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-gray-100 pt-2.5 text-[11px]">
+          <Metric label="P/E" value={num1(s.pe)} />
+          <Metric label="P/B" value={num1(s.pb)} />
+          <Metric label="EPS" value={s.eps == null ? null : `₦${s.eps.toFixed(2)}`} />
+          <Metric label="Yield" value={pct1(s.dividend_yield)} />
+          <Metric label="Net mgn" value={pct1(s.net_margin)} />
+          <Metric label="Cap" value={formatCap(s.market_cap)} />
+        </div>
+      )}
+
       {s.news.length > 0 && (
         <div className="mt-3 border-t border-gray-100 pt-2.5">
           <button
@@ -145,7 +182,7 @@ export default function NgxSummaries() {
       <div className="flex items-baseline gap-3">
         <h2 className="text-base font-semibold text-gray-900">NGX (Nigerian Exchange)</h2>
         <span className="text-[11px] text-gray-400">
-          Price, momentum &amp; Nigerian-press headlines — no analyst/earnings feed exists for NGX
+          Price, momentum, valuation &amp; Nigerian-press headlines — no analyst ratings/targets exist for NGX
         </span>
       </div>
 

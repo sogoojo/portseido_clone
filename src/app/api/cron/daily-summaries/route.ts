@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDailySummaries } from '@/lib/services/summaries';
 import { refreshRotationUniverse } from '@/lib/services/rotation';
+import { getNgxSummaries } from '@/lib/services/ngx-summaries';
 import { checkAndApplySplits, type SplitCheckResult } from '@/lib/services/splits';
 
 // Summaries + the Radar universe's end-of-day price pull share this run; the
@@ -65,7 +66,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ data: { ...result, rotation, splits } });
+    // Warm NGX price + momentum for the summaries page (held + watchlist names).
+    // Candle history caches permanently, so this one-time-per-name backfill keeps
+    // the page's first real visit fast. Best-effort; skipped on backfills.
+    let ngx: { count: number } | { error: string } | null = null;
+    if (!dateParam) {
+      try {
+        ngx = { count: (await getNgxSummaries()).length };
+      } catch (err) {
+        ngx = { error: (err as Error).message };
+        console.error('[Cron/daily-summaries] NGX warm failed:', err);
+      }
+    }
+
+    return NextResponse.json({ data: { ...result, rotation, ngx, splits } });
   } catch (err) {
     console.error('[Cron/daily-summaries] Error:', err);
     return NextResponse.json(

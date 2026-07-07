@@ -116,7 +116,7 @@ export interface PortfolioSummary {
 // --- Daily Summaries ---
 
 export interface NewsArticle {
-  source: 'yahoo' | 'brave';
+  source: 'yahoo' | 'brave' | 'nairametrics' | 'businessday';
   title: string;
   url: string;
   publisher: string;
@@ -262,6 +262,32 @@ export interface TargetRow {
   ticker: string;
   tier: number | null;
   target_pct: number;
+}
+
+/**
+ * Price + momentum snapshot for a Nigerian (NGX) stock. NGX has no Yahoo feed,
+ * so the analyst/fundamental/news signals of a DailySummary don't exist here —
+ * only the TradingView OHLC candle history, from which we derive momentum and
+ * trend. Prices are in the ticker's native currency (NGN).
+ */
+export interface NgxSummary {
+  ticker: string;               // "NSENG:MTNN"
+  name: string | null;          // "MTN Nigeria"
+  date: string | null;          // latest candle date (last NGX trading day)
+  close: number | null;
+  previous_close: number | null;
+  change_pct: number | null;    // last close vs previous close
+  currency: string;             // "NGN"
+  ret_5d: number | null;        // trailing returns as fractions (0.1 = +10%)
+  ret_1m: number | null;
+  ret_3m: number | null;
+  ret_6m: number | null;
+  ret_1y: number | null;
+  ext50: number | null;         // close / 50-day MA - 1 (trend stretch)
+  above_200d: boolean | null;   // close above its 200-day MA (long-term uptrend)
+  news: NewsArticle[];          // matched Nigerian-press headlines (may be empty)
+  stale: boolean;               // true when no fresh price could be loaded
+  warning?: string;
 }
 
 export type NotePortfolio = 'global' | 'ngx';

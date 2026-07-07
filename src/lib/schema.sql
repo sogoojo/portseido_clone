@@ -171,3 +171,15 @@ CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- Cached Nigerian-press headlines (Nairametrics / BusinessDay RSS), matched to
+-- NGX holdings at read time. NGX has no analyst/news feed on Yahoo, so these
+-- free RSS sources supply the event/news layer for the NGX summaries section.
+-- Keyed by link so re-fetching the same feed upserts rather than duplicates.
+CREATE TABLE IF NOT EXISTS ngx_news (
+  link TEXT PRIMARY KEY,
+  source TEXT NOT NULL,          -- 'nairametrics' | 'businessday'
+  title TEXT NOT NULL,
+  published_at TEXT,             -- ISO 8601, or null if the feed omitted it
+  fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import type { DailySummary, NewsArticle, ThesisEvaluated } from '@/lib/types';
 import SentimentTrends from '@/components/summaries/SentimentTrends';
 import ThesisCard from '@/components/summaries/ThesisCard';
+import NgxSummaries from '@/components/summaries/NgxSummaries';
 import { useApi } from '@/lib/hooks';
 
 type Sentiment = 'negative' | 'neutral' | 'positive' | 'none';
@@ -384,29 +385,34 @@ export default function SummariesPage() {
         )}
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="animate-pulse rounded-lg bg-gray-200 h-32" />
-          ))}
-        </div>
-      ) : scored.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
-          <p className="text-gray-500">No summaries found. Run <code className="text-sm bg-gray-100 px-1.5 py-0.5 rounded">npm run daily-summaries</code> to fetch data.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {scored.map(({ summary, sentiment }) => (
-            <SummaryCard
-              key={`${summary.ticker}-${summary.date}`}
-              summary={summary}
-              sentiment={sentiment}
-              thesis={thesisByTicker.get(summary.ticker) ?? null}
-              onThesisChanged={() => setThesisVersion((v) => v + 1)}
-            />
-          ))}
-        </div>
-      )}
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold text-gray-900">Global (US / EU / Crypto)</h2>
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="animate-pulse rounded-lg bg-gray-200 h-32" />
+            ))}
+          </div>
+        ) : scored.length === 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
+            <p className="text-gray-500">No summaries found. Run <code className="text-sm bg-gray-100 px-1.5 py-0.5 rounded">npm run daily-summaries</code> to fetch data.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {scored.map(({ summary, sentiment }) => (
+              <SummaryCard
+                key={`${summary.ticker}-${summary.date}`}
+                summary={summary}
+                sentiment={sentiment}
+                thesis={thesisByTicker.get(summary.ticker) ?? null}
+                onThesisChanged={() => setThesisVersion((v) => v + 1)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <NgxSummaries />
 
       <SentimentTrends />
     </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PortfolioHolding } from '@/lib/types';
 
@@ -215,7 +215,12 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
     return data;
   }
 
-  const pieData = buildPieData();
+  // Memoise so hovering (which only flips `hoveredIndex`) doesn't hand Recharts
+  // a fresh data array — a new reference makes it replay its entry animation,
+  // flashing every slice label off and back on. Recompute only on real input
+  // changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pieData = useMemo(() => buildPieData(), [holdings, viewMode, groupMode, cashBalance]);
   const totalValue = pieData.reduce((s, d) => s + d.value, 0);
 
   const hoveredItem = hoveredIndex != null ? pieData[hoveredIndex] : null;

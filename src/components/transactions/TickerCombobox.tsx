@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import type { TickerOption } from '@/lib/types';
+import type { TickerOption, TickerSearchResult } from '@/lib/types';
 
 interface TickerComboboxProps {
   value: string;
@@ -43,15 +43,50 @@ function rank(options: TickerOption[], q: string, preferCurrency?: string): Tick
 export default function TickerCombobox({ value, onChange, options, preferCurrency, placeholder }: TickerComboboxProps) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const [remote, setRemote] = useState<TickerSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
 
   const q = value.trim().toUpperCase();
   const filtered = rank(options, q, preferCurrency).slice(0, MAX_RESULTS);
   const exactMatch = q !== '' && options.some((o) => o.ticker === q);
-  const showAddNew = q !== '' && !exactMatch;
-  // Filtering can shrink the list past the highlighted index; clamp at use.
-  const activeIndex = Math.min(highlight, Math.max(filtered.length - 1, 0));
+
+  // Live Yahoo symbol search for instruments we've never seen — so adding a new
+  // ticker doesn't require knowing its exchange suffix (QDVE → QDVE.DE). Kicks
+  // in only when local matches are thin; debounced; drops symbols already local.
+  const localSymbols = new Set(options.map((o) => o.ticker.toUpperCase()));
+  useEffect(() => {
+    if (q.length < 2 || filtered.length >= 5) {
+      setRemote([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/tickers/search?q=${encodeURIComponent(q)}`);
+        const json = await res.json();
+        if (!cancelled) setRemote(Array.isArray(json.data) ? json.data : []);
+      } catch {
+        if (!cancelled) setRemote([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, filtered.length]);
+
+  const remoteResults = remote.filter((r) => !localSymbols.has(r.symbol.toUpperCase()));
+  const showAddNew = q !== '' && !exactMatch && remoteResults.length === 0 && !searching;
+  // Highlight spans local rows then remote rows; clamp past the combined length.
+  const totalRows = filtered.length + remoteResults.length;
+  const activeIndex = Math.min(highlight, Math.max(totalRows - 1, 0));
 
   // Close the dropdown when clicking outside (but keep the typed value).
   useEffect(() => {
@@ -79,14 +114,19 @@ export default function TickerCombobox({ value, onChange, options, preferCurrenc
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setOpen(true);
-      setHighlight((h) => Math.min(h + 1, filtered.length - 1));
+      setHighlight((h) => Math.min(h + 1, totalRows - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlight((h) => Math.max(h - 1, 0));
     } else if (e.key === 'Enter') {
-      if (open && filtered[activeIndex]) {
+      if (!open) return;
+      const symbol =
+        activeIndex < filtered.length
+          ? filtered[activeIndex]?.ticker
+          : remoteResults[activeIndex - filtered.length]?.symbol;
+      if (symbol) {
         e.preventDefault();
-        choose(filtered[activeIndex].ticker);
+        choose(symbol);
       }
     }
   }
@@ -112,7 +152,7 @@ export default function TickerCombobox({ value, onChange, options, preferCurrenc
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
 
-      {open && (filtered.length > 0 || showAddNew) && (
+      {open && (totalRows > 0 || showAddNew || searching) && (
         <ul
           id={listboxId}
           role="listbox"
@@ -144,6 +184,41 @@ export default function TickerCombobox({ value, onChange, options, preferCurrenc
               </span>
             </li>
           ))}
+          {remoteResults.length > 0 && (
+            <li className="border-t border-gray-100 px-3 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+              Search results
+            </li>
+          )}
+          {remoteResults.map((r, j) => {
+            const i = filtered.length + j;
+            return (
+              <li
+                key={`remote-${r.symbol}`}
+                role="option"
+                aria-selected={i === activeIndex}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  choose(r.symbol);
+                }}
+                onMouseEnter={() => setHighlight(i)}
+                className={`flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm ${
+                  i === activeIndex ? 'bg-blue-50' : ''
+                }`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="font-medium text-gray-900">{r.symbol}</span>
+                  {r.name && <span className="truncate text-gray-500">{r.name}</span>}
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5 text-xs text-gray-400">
+                  {r.exchange && <span>{r.exchange}</span>}
+                  {r.currency && <span>{r.currency}</span>}
+                </span>
+              </li>
+            );
+          })}
+          {searching && remoteResults.length === 0 && (
+            <li className="px-3 py-1.5 text-sm text-gray-400">Searching…</li>
+          )}
           {showAddNew && (
             <li
               role="option"

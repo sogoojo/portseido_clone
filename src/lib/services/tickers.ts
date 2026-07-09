@@ -1,5 +1,8 @@
+import YahooFinance from 'yahoo-finance2';
 import db from '@/lib/db';
-import type { TickerOption } from '@/lib/types';
+import type { TickerOption, TickerSearchResult } from '@/lib/types';
+
+const yahooFinance = new YahooFinance();
 
 // The universe of tickers the picker can offer: everything we've ever seen
 // metadata for, plus the watchlist, plus tickers already traded, plus
@@ -35,4 +38,34 @@ export function getKnownTickers(): TickerOption[] {
     .all() as Array<Omit<TickerOption, 'held'> & { held: number }>;
 
   return rows.map((r) => ({ ...r, held: !!r.held }));
+}
+
+// Live symbol lookup so the picker can add instruments the app has never seen
+// (e.g. QDVE → QDVE.DE) without the user knowing Yahoo's exchange-suffix rules.
+// `validateResult: false` is REQUIRED — the library's strict schema throws on
+// some rows (e.g. QDVE fails #/definitions/SearchResult). No NGX coverage.
+export async function searchTickers(query: string): Promise<TickerSearchResult[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const res = (await yahooFinance.search(
+    q,
+    { quotesCount: 10, newsCount: 0, enableFuzzyQuery: false },
+    { validateResult: false }
+  )) as { quotes?: Array<Record<string, unknown>> };
+
+  const quotes = res?.quotes ?? [];
+  return quotes
+    .filter((row) => typeof row.symbol === 'string' && row.symbol)
+    .map((row) => ({
+      symbol: row.symbol as string,
+      name:
+        (row.shortname as string) ||
+        (row.longname as string) ||
+        (row.shortName as string) ||
+        null,
+      exchange: (row.exchDisp as string) || (row.exchange as string) || null,
+      quoteType: (row.quoteType as string) || (row.typeDisp as string) || null,
+      currency: (row.currency as string) || null,
+    }));
 }

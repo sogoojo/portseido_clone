@@ -78,6 +78,16 @@ export interface TickerOption {
   held: boolean; // appears in a buy/sell transaction (i.e. owned or once-owned)
 }
 
+// A live Yahoo Finance symbol-search hit — for adding genuinely new tickers
+// the app hasn't seen. No NGX coverage (Yahoo doesn't list Nigerian names).
+export interface TickerSearchResult {
+  symbol: string;
+  name: string | null;
+  exchange: string | null;
+  quoteType: string | null; // EQUITY | ETF | CRYPTOCURRENCY | ...
+  currency: string | null;
+}
+
 // --- Portfolio ---
 
 export interface PortfolioHolding {

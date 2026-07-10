@@ -3,6 +3,15 @@ import { getCurrentPrice, getMultipleCurrentPrices } from '@/lib/services/prices
 import { convert } from '@/lib/services/fx';
 import type { Transaction, PortfolioHolding, Account } from '@/lib/types';
 
+// NGX (Nigerian, NGN) is tracked in isolation: it is deliberately kept OUT of
+// the multi-currency aggregate ('all') figures so it's never merged into the
+// EUR/USD totals, holdings, P/L or deposited. It stays fully visible on its own
+// via ?account=ngx. Any account in this currency is excluded from aggregates.
+const ISOLATED_CURRENCY = 'NGN';
+// SQL fragment (safe: hardcoded constant) that drops isolated-currency accounts
+// from an aggregate query joined to `accounts a`.
+const AGG_CCY_FILTER = `AND a.currency != '${ISOLATED_CURRENCY}'`;
+
 // --- FIFO lot tracking ---
 
 interface Lot {
@@ -84,8 +93,10 @@ const tradeCcyStmt = db.prepare(
 );
 
 export async function getHoldings(accountId?: string): Promise<PortfolioHolding[]> {
-  const condition = accountId && accountId !== 'all' ? 'AND t.account_id = ?' : '';
-  const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
+  const single = accountId && accountId !== 'all';
+  // Aggregate view excludes the isolated (NGX) account entirely.
+  const condition = single ? 'AND t.account_id = ?' : AGG_CCY_FILTER;
+  const params: string[] = single ? [accountId] : [];
 
   const tickers = db.prepare(
     `SELECT DISTINCT t.ticker, t.account_id, a.currency as account_currency
@@ -288,8 +299,12 @@ export async function getAggregateValue(): Promise<AggregateValue> {
       cash_usd: cashUsd,
     });
 
-    totalEur += valueEur;
-    totalUsd += valueUsd;
+    // The isolated (NGX/NGN) account stays in the accounts list — so it's still
+    // shown on its own — but is kept out of the merged EUR/USD totals.
+    if (account.currency !== ISOLATED_CURRENCY) {
+      totalEur += valueEur;
+      totalUsd += valueUsd;
+    }
   }
 
   return { total_eur: totalEur, total_usd: totalUsd, accounts: accountValues };
@@ -321,7 +336,7 @@ export async function getTotalDeposited(accountId?: string): Promise<number> {
   const rows = db.prepare(
     `SELECT COALESCE(NULLIF(t.currency, ''), a.currency) as ccy, COALESCE(SUM(t.amount), 0) as total
      FROM transactions t JOIN accounts a ON t.account_id = a.id
-     WHERE t.type = 'deposit'
+     WHERE t.type = 'deposit' ${AGG_CCY_FILTER}
      GROUP BY ccy`
   ).all() as { ccy: string; total: number }[];
   let total = 0;
@@ -389,9 +404,11 @@ export interface AllTimePnL {
  * Aggregate: converted to USD.
  */
 export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
-  const condition = accountId && accountId !== 'all' ? 'AND t.account_id = ?' : '';
-  const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
   const aggregate = !accountId || accountId === 'all';
+  // Aggregate view excludes the isolated (NGX) account from realised,
+  // unrealised, cost basis and dividends alike (this condition feeds both).
+  const condition = aggregate ? AGG_CCY_FILTER : 'AND t.account_id = ?';
+  const params: string[] = aggregate ? [] : [accountId];
 
   // Display-currency conversion (USD for the aggregate view)
   const fxCache = new Map<string, number>();

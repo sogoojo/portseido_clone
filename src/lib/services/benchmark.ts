@@ -15,9 +15,11 @@ export interface CounterfactualResult {
 }
 
 export async function calculateCounterfactual(accountId?: string): Promise<CounterfactualResult> {
-  // Get all deposit and withdrawal transactions
-  const condition = accountId && accountId !== 'all' ? 'AND account_id = ?' : '';
-  const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
+  // Get all deposit and withdrawal transactions. Aggregate ('all') isolates
+  // NGX — its NGN cash flows are excluded from the S&P counterfactual too.
+  const single = accountId && accountId !== 'all';
+  const condition = single ? 'AND t.account_id = ?' : `AND a.currency != 'NGN'`;
+  const params: string[] = single ? [accountId] : [];
 
   const cashFlows = db.prepare(
     `SELECT t.date, t.type, t.amount, t.currency, a.currency as account_currency

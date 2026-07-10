@@ -79,8 +79,12 @@ function isoDaysAgo(base: Date, days: number): Date {
 }
 
 export async function buildValuationContext(accountId: string | undefined, to: Date): Promise<ValuationContext> {
-  const condition = accountId && accountId !== 'all' ? 'AND t.account_id = ?' : '';
-  const params: string[] = accountId && accountId !== 'all' ? [accountId] : [];
+  const single = accountId && accountId !== 'all';
+  // Aggregate ('all') valuation isolates NGX: the NGN account is excluded so
+  // it's never merged into the EUR/USD value-over-time / MWR figures. It's
+  // still valued on its own via ?account=ngx.
+  const condition = single ? 'AND t.account_id = ?' : `AND a.currency != 'NGN'`;
+  const params: string[] = single ? [accountId] : [];
   const toStr = to.toISOString().split('T')[0];
 
   const transactions = db.prepare(

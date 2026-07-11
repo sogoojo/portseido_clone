@@ -48,8 +48,8 @@ function printText(report: IntegrityAuditReport): void {
   console.log('\nExact-economic reconciliation candidates (not confirmed duplicates)');
   if (report.exact_economic_candidates.length === 0) console.log('  none');
   for (const row of report.exact_economic_candidates) {
-    const sequence = row.same_day_sequence.map(t => `#${t.id} ${t.type} ${t.quantity}@${t.price_per_unit} ${t.currency}`).join(' | ');
-    console.log(`  ${row.date} ${row.account_id}/${row.ticker ?? 'cash'} ${row.type}: candidate_ids=${row.ids.join(',')}`);
+    const sequence = row.same_day_sequence.map(t => `#${t.id} ${t.type} ${t.quantity}@${t.price_per_unit} ${t.currency}${t.notes ? ` [${t.notes}]` : ''}`).join(' | ');
+    console.log(`  ${row.date} ${row.account_id}/${row.ticker ?? 'cash'} ${row.type} ${row.currency}: candidate_ids=${row.ids.join(',')}`);
     if (sequence) console.log(`    full-day sequence: ${sequence}`);
   }
 
@@ -63,7 +63,7 @@ function printText(report: IntegrityAuditReport): void {
     }
   }
 
-  console.log('\nNotes: price evidence uses only already-cached closes/FX, with no network calls. Candidates require broker-statement review; this command never changes data.');
+  console.log('\nNotes: price evidence uses only already-cached closes/FX, with no network calls. Historical FX is often absent, so converted-close evidence may be unavailable; a raw-close match alone is not proof of a mislabeled currency. Candidates require broker-statement review; this command never changes data.');
 }
 
 const { dbPath, json } = parseArgs(process.argv.slice(2));

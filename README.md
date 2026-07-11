@@ -53,7 +53,7 @@ Prices/FX are cached in SQLite with a 15-minute staleness window (2h for NGX, wh
 
 Run `npm run audit:integrity` to inspect the local database without modifying it or making network calls. The command opens SQLite in read-only/query-only mode and reports invalid rows, amount mismatches, chronological oversells, exact-economic reconciliation candidates (with the full same-day trade sequence), and mixed-currency positions with cached-close/FX magnitude evidence.
 
-Use `npm run audit:integrity -- --json` for a reviewable JSON report, or `--db /path/to/copy.db` to audit a database copy. Exact-economic matches are candidates, not confirmed duplicates; reconcile them against the broker statement before changing transactions.
+Use `npm run audit:integrity -- --json` for a reviewable JSON report, or `--db /path/to/copy.db` to audit a database copy. Exact-economic matches are candidates, not confirmed duplicates; reconcile them against the broker statement before changing transactions. Price evidence uses only existing cache data, and historical FX is often unavailable, so a raw-close match alone is not proof that a transaction's currency label is wrong.
 
 ## Importing data
 

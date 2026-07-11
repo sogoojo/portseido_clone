@@ -46,6 +46,7 @@ export interface SameDayTrade {
   quantity: number;
   price_per_unit: number;
   currency: string;
+  notes: string | null;
 }
 
 export interface ExactEconomicCandidate {
@@ -56,11 +57,12 @@ export interface ExactEconomicCandidate {
   quantity: number | null;
   price_per_unit: number | null;
   amount: number | null;
+  currency: string;
   ids: number[];
   same_day_sequence: SameDayTrade[];
 }
 
-export type PriceMagnitudeMatch = 'recorded_matches_close' | 'recorded_matches_fx_converted_close' | 'neither' | 'insufficient_data';
+export type PriceMagnitudeMatch = 'recorded_matches_close' | 'recorded_matches_fx_converted_close' | 'ambiguous' | 'neither' | 'insufficient_data';
 
 export interface TradePriceEvidence {
   id: number;
@@ -94,6 +96,7 @@ export interface IntegrityAuditReport {
   thresholds: {
     amount_tolerance: number;
     price_magnitude_tolerance_pct: number;
+    ambiguity_difference_pct: number;
     maximum_price_lookback_days: number;
   };
   summary: {
@@ -114,6 +117,9 @@ export interface IntegrityAuditReport {
 const VALID_TYPES = new Set<TxType>(['buy', 'sell', 'deposit', 'withdrawal', 'dividend']);
 const AMOUNT_TOLERANCE = 0.01;
 const PRICE_MAGNITUDE_TOLERANCE = 0.15;
+// If both hypotheses pass and their errors are within two percentage points,
+// the cached evidence is not strong enough to prefer either currency label.
+const AMBIGUITY_DIFFERENCE = 0.02;
 const MAX_PRICE_LOOKBACK_DAYS = 7;
 
 function round(value: number, places = 6): number {
@@ -171,12 +177,26 @@ function priceEvidence(db: Database.Database, trade: TradeRow): TradePriceEviden
 
   const fxRate = latestFxRate(db, usableClose.currency, trade.currency, trade.date);
   const convertedClose = fxRate == null ? null : usableClose.close * fxRate;
+  const distinctCurrencyHypotheses = usableClose.currency.toUpperCase() !== trade.currency.toUpperCase();
   const rawRatio = trade.price_per_unit / usableClose.close;
   const convertedRatio = convertedClose && convertedClose > 0 ? trade.price_per_unit / convertedClose : null;
+  const rawDifference = relativeDifference(trade.price_per_unit, usableClose.close);
+  const convertedDifference = convertedClose == null
+    ? Number.POSITIVE_INFINITY
+    : relativeDifference(trade.price_per_unit, convertedClose);
+  const rawPlausible = rawDifference <= PRICE_MAGNITUDE_TOLERANCE;
+  const convertedPlausible = distinctCurrencyHypotheses && convertedDifference <= PRICE_MAGNITUDE_TOLERANCE;
+
   let magnitudeMatch: PriceMagnitudeMatch = 'neither';
-  if (relativeDifference(trade.price_per_unit, usableClose.close) <= PRICE_MAGNITUDE_TOLERANCE) {
+  if (rawPlausible && convertedPlausible && Math.abs(rawDifference - convertedDifference) <= AMBIGUITY_DIFFERENCE) {
+    magnitudeMatch = 'ambiguous';
+  } else if (rawPlausible && convertedPlausible) {
+    magnitudeMatch = rawDifference < convertedDifference
+      ? 'recorded_matches_close'
+      : 'recorded_matches_fx_converted_close';
+  } else if (rawPlausible) {
     magnitudeMatch = 'recorded_matches_close';
-  } else if (convertedClose != null && relativeDifference(trade.price_per_unit, convertedClose) <= PRICE_MAGNITUDE_TOLERANCE) {
+  } else if (convertedPlausible) {
     magnitudeMatch = 'recorded_matches_fx_converted_close';
   }
 
@@ -251,18 +271,18 @@ export function runIntegrityAudit(db: Database.Database, databasePath = '(provid
   }
 
   const duplicateGroups = db.prepare(
-    `SELECT account_id, date, type, ticker, quantity, price_per_unit, amount,
+    `SELECT account_id, date, type, ticker, quantity, price_per_unit, amount, currency,
             GROUP_CONCAT(id) AS ids
      FROM transactions
      GROUP BY account_id, date, type, COALESCE(ticker, ''), COALESCE(quantity, -1),
-              COALESCE(price_per_unit, -1), COALESCE(amount, -1)
+              COALESCE(price_per_unit, -1), COALESCE(amount, -1), UPPER(currency)
      HAVING COUNT(*) > 1
      ORDER BY date, account_id, ticker`
   ).all() as Array<Omit<ExactEconomicCandidate, 'ids' | 'same_day_sequence'> & { ids: string }>;
 
   const exactCandidates = duplicateGroups.map(group => {
     const sequence = group.ticker ? db.prepare(
-      `SELECT id, type, quantity, price_per_unit, currency
+      `SELECT id, type, quantity, price_per_unit, currency, notes
        FROM transactions
        WHERE account_id = ? AND date = ? AND ticker = ? AND type IN ('buy', 'sell')
        ORDER BY id`
@@ -295,6 +315,7 @@ export function runIntegrityAudit(db: Database.Database, databasePath = '(provid
     thresholds: {
       amount_tolerance: AMOUNT_TOLERANCE,
       price_magnitude_tolerance_pct: PRICE_MAGNITUDE_TOLERANCE * 100,
+      ambiguity_difference_pct: AMBIGUITY_DIFFERENCE * 100,
       maximum_price_lookback_days: MAX_PRICE_LOOKBACK_DAYS,
     },
     summary: {

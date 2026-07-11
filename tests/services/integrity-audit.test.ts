@@ -28,7 +28,7 @@ describe('runIntegrityAudit', () => {
     db.exec(`
       INSERT INTO transactions VALUES
         (1, 'tr', '2025-09-18', 'sell', 'AMD', 5, 134.04, 670.20, 'EUR', 0, NULL),
-        (2, 'tr', '2025-09-18', 'buy',  'AMD', 5, 134.04, 670.20, 'EUR', 0, NULL),
+        (2, 'tr', '2025-09-18', 'buy',  'AMD', 5, 134.04, 670.20, 'EUR', 0, 'order-2'),
         (3, 'tr', '2025-09-18', 'buy',  'AMD', 5, 134.04, 670.20, 'EUR', 0, NULL),
         (4, 'tr', '2025-09-18', 'sell', 'AMD', 5, 134.00, 670.00, 'EUR', 0, NULL),
         (5, 'tr', '2025-09-18', 'buy',  'AMD', 5, 134.04, 670.20, 'EUR', 0, NULL);
@@ -37,14 +37,25 @@ describe('runIntegrityAudit', () => {
     expect(report.exact_economic_candidates).toHaveLength(1);
     expect(report.exact_economic_candidates[0].ids).toEqual([2, 3, 5]);
     expect(report.exact_economic_candidates[0].same_day_sequence.map(t => t.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(report.exact_economic_candidates[0].same_day_sequence[1].notes).toBe('order-2');
     expect(report.oversell_candidates[0]).toMatchObject({ id: 1, quantity_available: 0, shortfall: 5 });
+  });
+
+  it('does not group identical economics recorded in different currencies', () => {
+    const db = fixtureDb();
+    db.exec(`
+      INSERT INTO transactions VALUES
+        (6, 'tr', '2025-09-18', 'buy', 'AMD', 5, 134.04, 670.20, 'EUR', 0, NULL),
+        (7, 'tr', '2025-09-18', 'buy', 'AMD', 5, 134.04, 670.20, 'USD', 0, NULL);
+    `);
+    expect(runIntegrityAudit(db).exact_economic_candidates).toHaveLength(0);
   });
 
   it('reports amount mismatches and mixed-currency price evidence without deciding a relabel', () => {
     const db = fixtureDb();
     db.exec(`
       INSERT INTO transactions VALUES
-        (10, 'degiro', '2025-01-02', 'buy', 'MSFT', 2, 420, 999, 'EUR', 0, NULL),
+        (10, 'degiro', '2025-01-02', 'buy', 'MSFT', 2, 402, 999, 'EUR', 0, 'broker-ref-10'),
         (11, 'degiro', '2025-02-03', 'buy', 'MSFT', 1, 415, 415, 'USD', 0, NULL);
       INSERT INTO price_cache VALUES
         ('MSFT', '2025-01-02', 418, 'USD'),
@@ -52,12 +63,27 @@ describe('runIntegrityAudit', () => {
       INSERT INTO fx_cache VALUES ('USDEUR', '2025-01-02', 0.96);
     `);
     const report = runIntegrityAudit(db);
-    expect(report.amount_mismatches[0]).toMatchObject({ id: 10, computed_amount: 840, difference: 159 });
+    expect(report.amount_mismatches[0]).toMatchObject({ id: 10, computed_amount: 804, difference: 195 });
     expect(report.mixed_currency_positions).toHaveLength(1);
     expect(report.mixed_currency_positions[0]).toMatchObject({ first_buy_currency: 'EUR', currencies: ['EUR', 'USD'] });
     expect(report.mixed_currency_positions[0].price_evidence.map(e => e.magnitude_match)).toEqual([
-      'recorded_matches_close', 'recorded_matches_close',
+      'recorded_matches_fx_converted_close', 'recorded_matches_close',
     ]);
+  });
+
+  it('reports ambiguity when raw and converted-close hypotheses are similarly plausible', () => {
+    const db = fixtureDb();
+    db.exec(`
+      INSERT INTO transactions VALUES
+        (12, 'degiro', '2025-01-02', 'buy', 'MSFT', 1, 407, 407, 'EUR', 0, NULL),
+        (13, 'degiro', '2025-02-03', 'buy', 'MSFT', 1, 415, 415, 'USD', 0, NULL);
+      INSERT INTO price_cache VALUES
+        ('MSFT', '2025-01-02', 418, 'USD'),
+        ('MSFT', '2025-02-03', 412, 'USD');
+      INSERT INTO fx_cache VALUES ('USDEUR', '2025-01-02', 0.95);
+    `);
+    const report = runIntegrityAudit(db);
+    expect(report.mixed_currency_positions[0].price_evidence[0].magnitude_match).toBe('ambiguous');
   });
 
   it('detects a chronological oversell per account and ticker', () => {

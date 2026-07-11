@@ -206,6 +206,107 @@ export async function getHoldings(accountId?: string): Promise<PortfolioHolding[
   return holdings;
 }
 
+// --- NGX holdings by physical broker ---
+
+export interface NgxBrokerBreakdown {
+  broker: string;
+  holdings: PortfolioHolding[];
+  total_value: number;
+}
+
+type NgxBroker = 'Trove' | 'Bamboo' | 'Other';
+
+function ngxBrokerFromNotes(notes: string | null): NgxBroker {
+  if (notes?.startsWith('Trove ')) return 'Trove';
+  if (notes?.startsWith('Bamboo ')) return 'Bamboo';
+  return 'Other';
+}
+
+/**
+ * Split the single NGX account into its physical broker holdings. Provenance
+ * lives in transaction notes, so FIFO must be replayed per (broker, ticker): a
+ * sale at Trove must never consume a Bamboo lot for the same ticker.
+ */
+export async function getNgxBrokerHoldings(): Promise<NgxBrokerBreakdown[]> {
+  type NgxTrade = Pick<Transaction, 'date' | 'type' | 'ticker' | 'quantity' | 'price_per_unit' | 'commission' | 'notes'>;
+  const rows = db.prepare(
+    `SELECT date, type, ticker, quantity, price_per_unit, commission, notes
+     FROM transactions
+     WHERE account_id = 'ngx' AND type IN ('buy', 'sell') AND ticker IS NOT NULL
+     ORDER BY date, id`
+  ).all() as NgxTrade[];
+
+  const grouped = new Map<string, { broker: NgxBroker; ticker: string; transactions: NgxTrade[] }>();
+  for (const row of rows) {
+    const broker = ngxBrokerFromNotes(row.notes);
+    const ticker = row.ticker!;
+    const key = `${broker}\u0000${ticker}`;
+    let group = grouped.get(key);
+    if (!group) {
+      group = { broker, ticker, transactions: [] };
+      grouped.set(key, group);
+    }
+    group.transactions.push(row);
+  }
+
+  const openGroups: { broker: NgxBroker; ticker: string; fifo: FIFOResult }[] = [];
+  for (const group of grouped.values()) {
+    const fifo = computeFIFO(group.transactions);
+    if (fifo.quantity > 0.0001) openGroups.push({ broker: group.broker, ticker: group.ticker, fifo });
+  }
+
+  const tickers = [...new Set(openGroups.map(group => group.ticker))];
+  const prices = await getMultipleCurrentPrices(tickers);
+  const priceMap = new Map(prices.map(price => [price.ticker, price]));
+  const byBroker = new Map<NgxBroker, PortfolioHolding[]>();
+
+  for (const { broker, ticker, fifo } of openGroups) {
+    const price = priceMap.get(ticker);
+    const currentPrice = price?.price ?? 0;
+    const marketValue = fifo.quantity * currentPrice;
+    const unrealisedGain = marketValue - fifo.cost_basis;
+    const meta = tickerMetaStmt.get(ticker) as {
+      name: string | null; sector: string | null; industry: string | null;
+      asset_type: string | null; market: string | null;
+    } | undefined;
+
+    const holding: PortfolioHolding = {
+      ticker,
+      name: meta?.name || null,
+      sector: meta?.sector || null,
+      industry: meta?.industry || null,
+      asset_type: meta?.asset_type || null,
+      market: meta?.market || null,
+      account_id: 'ngx',
+      quantity: fifo.quantity,
+      avg_cost: fifo.avg_cost,
+      cost_basis: fifo.cost_basis,
+      current_price: currentPrice,
+      market_value: marketValue,
+      unrealised_gain: unrealisedGain,
+      unrealised_gain_pct: fifo.cost_basis > 0 ? (unrealisedGain / fifo.cost_basis) * 100 : 0,
+      day_gain: price?.change == null ? 0 : fifo.quantity * price.change,
+      day_gain_pct: price?.changePct ?? 0,
+      allocation_pct: 0,
+      currency: 'NGN',
+    };
+    const holdings = byBroker.get(broker) ?? [];
+    holdings.push(holding);
+    byBroker.set(broker, holdings);
+  }
+
+  const order: NgxBroker[] = ['Trove', 'Bamboo', 'Other'];
+  return order.flatMap(broker => {
+    const holdings = byBroker.get(broker);
+    if (!holdings?.length) return [];
+    const totalValue = holdings.reduce((sum, holding) => sum + holding.market_value, 0);
+    for (const holding of holdings) {
+      holding.allocation_pct = totalValue > 0 ? (holding.market_value / totalValue) * 100 : 0;
+    }
+    return [{ broker, holdings, total_value: totalValue }];
+  });
+}
+
 // --- Cash Balance ---
 
 export async function getCashBalance(accountId: string): Promise<number> {

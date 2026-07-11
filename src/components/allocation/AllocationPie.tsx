@@ -20,9 +20,10 @@ interface AllocationPieProps {
   currency?: string;
   defaultGroupMode?: GroupMode;
   title?: string;
+  compact?: boolean;
 }
 
-function formatMoney(value: number, currency?: string): string {
+export function formatMoney(value: number, currency?: string): string {
   const sym = currency === 'EUR' ? '€' : currency === 'NGN' ? '₦' : '$';
   const sign = value >= 0 ? '' : '-';
   const abs = Math.abs(value);
@@ -159,7 +160,7 @@ function renderLabel(props: any) {
   );
 }
 
-export default function AllocationPie({ holdings, cashBalance, currency, defaultGroupMode = 'holding', title }: AllocationPieProps) {
+export default function AllocationPie({ holdings, cashBalance, currency, defaultGroupMode = 'holding', title, compact = false }: AllocationPieProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('market_value');
   const [groupMode, setGroupMode] = useState<GroupMode>(defaultGroupMode);
   const [hoveredIndex, setHoveredIndex] = useState<number | undefined>(undefined);
@@ -173,11 +174,13 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
 
   function buildPieData(): PieDatum[] {
     let items: { name: string; value: number }[] = [];
+    const effectiveGroupMode: GroupMode = compact ? 'holding' : groupMode;
+    const effectiveViewMode: ViewMode = compact ? 'market_value' : viewMode;
 
-    if (groupMode === 'holding') {
+    if (effectiveGroupMode === 'holding') {
       items = holdings.map(h => {
         let value: number;
-        switch (viewMode) {
+        switch (effectiveViewMode) {
           case 'cost': value = h.cost_basis; break;
           case 'gain': value = Math.max(0, h.unrealised_gain); break;
           case 'loss': value = Math.abs(Math.min(0, h.unrealised_gain)); break;
@@ -190,7 +193,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
       for (const h of holdings) {
         const sector = normalizeSector(h);
         let value: number;
-        switch (viewMode) {
+        switch (effectiveViewMode) {
           case 'cost': value = h.cost_basis; break;
           case 'gain': value = Math.max(0, h.unrealised_gain); break;
           case 'loss': value = Math.abs(Math.min(0, h.unrealised_gain)); break;
@@ -201,7 +204,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
       items = Array.from(sectorMap.entries()).map(([name, value]) => ({ name, value }));
     }
 
-    if (viewMode === 'market_value' && cashBalance > 0) {
+    if (effectiveViewMode === 'market_value' && cashBalance > 0) {
       items.push({ name: 'Cash', value: cashBalance });
     }
 
@@ -211,7 +214,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
       .sort((a, b) => b.value - a.value)
       .map(i => ({ ...i, pct: total > 0 ? (i.value / total) * 100 : 0 }));
 
-    layoutLabels(data);
+    if (!compact) layoutLabels(data);
     return data;
   }
 
@@ -220,7 +223,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
   // flashing every slice label off and back on. Recompute only on real input
   // changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const pieData = useMemo(() => buildPieData(), [holdings, viewMode, groupMode, cashBalance]);
+  const pieData = useMemo(() => buildPieData(), [holdings, viewMode, groupMode, cashBalance, compact]);
   const totalValue = pieData.reduce((s, d) => s + d.value, 0);
 
   const hoveredItem = hoveredIndex != null ? pieData[hoveredIndex] : null;
@@ -228,7 +231,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5">
       {/* Title + group mode toggle */}
-      <div className="flex items-center justify-between mb-3">
+      {(title || !compact) && <div className="flex items-center justify-between mb-3">
         {title ? (
           <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
         ) : (
@@ -251,7 +254,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
             </button>
           </div>
         )}
-      </div>
+      </div>}
 
       {pieData.length === 0 ? (
         <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
@@ -259,7 +262,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
         </div>
       ) : (
         <div className="relative">
-          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+          <ResponsiveContainer width="100%" height={compact ? 260 : CHART_HEIGHT}>
             <PieChart>
               <Pie
                 data={pieData}
@@ -267,12 +270,12 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
                 cy="50%"
                 startAngle={90}
                 endAngle={-270}
-                innerRadius={INNER_RADIUS}
-                outerRadius={OUTER_RADIUS}
+                innerRadius={compact ? 52 : INNER_RADIUS}
+                outerRadius={compact ? 78 : OUTER_RADIUS}
                 paddingAngle={1.5}
                 dataKey="value"
                 nameKey="name"
-                label={renderLabel}
+                label={compact ? undefined : renderLabel}
                 labelLine={false}
                 strokeWidth={0}
                 onMouseLeave={() => setHoveredIndex(undefined)}
@@ -311,19 +314,21 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
       )}
 
       {/* View mode toggles */}
-      <div className="flex justify-center gap-1 mt-2">
-        {VIEW_OPTIONS.map(v => (
-          <button
-            key={v.key}
-            onClick={() => setViewMode(v.key)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              viewMode === v.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-            }`}
-          >
-            {v.label}
-          </button>
-        ))}
-      </div>
+      {!compact && (
+        <div className="flex justify-center gap-1 mt-2">
+          {VIEW_OPTIONS.map(v => (
+            <button
+              key={v.key}
+              onClick={() => setViewMode(v.key)}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                viewMode === v.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

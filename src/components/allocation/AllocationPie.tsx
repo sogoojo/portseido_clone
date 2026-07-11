@@ -53,15 +53,20 @@ function CustomTooltip({ active, payload, currency }: { active?: boolean; payloa
 
 const RADIAN = Math.PI / 180;
 
-// Chart geometry — labels are laid out against these constants, so they and
-// the <Pie> props must stay in sync
-const CHART_HEIGHT = 475;
-const CHART_CY = CHART_HEIGHT / 2;
-const INNER_RADIUS = 93;
-const OUTER_RADIUS = 131;
-const LABEL_RING = OUTER_RADIUS + 24; // labels live on this ring outside the donut
-const LABEL_MIN_PCT = 0.8; // label almost every slice, like Portseido
-const LABEL_SPACING = 15; // min vertical px between labels on one side
+// Chart geometry — labels are laid out against these values, so they and the
+// <Pie> props must stay in sync. Two fixed geometries: the full-size donut and
+// the compact broker mini-pie (smaller ring, tighter label spacing/font).
+interface PieGeometry {
+  height: number;      // chart height; vertical centre is height / 2
+  inner: number;       // donut inner radius
+  outer: number;       // donut outer radius
+  ring: number;        // labels live on this ring outside the donut
+  minPct: number;      // label slices at or above this percent
+  spacing: number;     // min vertical px between labels on one side
+  font: number;        // label font size
+}
+const FULL_GEOM: PieGeometry = { height: 475, inner: 93, outer: 131, ring: 155, minPct: 0.8, spacing: 15, font: 10.5 };
+const COMPACT_GEOM: PieGeometry = { height: 300, inner: 52, outer: 78, ring: 96, minPct: 0, spacing: 12, font: 9 };
 
 interface PieDatum {
   name: string;
@@ -80,17 +85,18 @@ interface PieDatum {
  *     so labels follow the donut's contour and leader lines stay short and
  *     never slash across neighbouring labels.
  */
-function layoutLabels(items: PieDatum[]): void {
+function layoutLabels(items: PieDatum[], g: PieGeometry): void {
   const total = items.reduce((s, i) => s + Math.max(0, i.value), 0);
   if (total <= 0) return;
+  const cy = g.height / 2;
 
   let cum = 0;
   const positioned = items.map(item => {
     const midDeg = 90 - ((cum + item.value / 2) / total) * 360; // startAngle 90, clockwise
     cum += item.value;
     const rad = -midDeg * RADIAN;
-    return { item, cos: Math.cos(rad), idealY: CHART_CY + LABEL_RING * Math.sin(rad) };
-  }).filter(p => p.item.pct >= LABEL_MIN_PCT);
+    return { item, cos: Math.cos(rad), idealY: cy + g.ring * Math.sin(rad) };
+  }).filter(p => p.item.pct >= g.minPct);
 
   const rightSide = positioned.filter(p => p.cos >= 0);
   const leftSide = positioned.filter(p => p.cos < 0).reverse(); // make it top→bottom too
@@ -99,66 +105,72 @@ function layoutLabels(items: PieDatum[]): void {
     // top-down: enforce spacing
     let prevY = -Infinity;
     for (const p of side) {
-      p.item.labelY = Math.max(p.idealY, prevY + LABEL_SPACING);
+      p.item.labelY = Math.max(p.idealY, prevY + g.spacing);
       prevY = p.item.labelY;
     }
     // bottom-up: keep everything inside the chart
-    let maxY = CHART_HEIGHT - 10;
+    let maxY = g.height - 10;
     for (let i = side.length - 1; i >= 0; i--) {
       side[i].item.labelY = Math.min(side[i].item.labelY!, maxY);
-      maxY = side[i].item.labelY! - LABEL_SPACING;
+      maxY = side[i].item.labelY! - g.spacing;
     }
     // x from final y, walking the label ring
     const dir = side === rightSide ? 1 : -1;
     for (const p of side) {
-      const dy = p.item.labelY! - CHART_CY;
-      const dx = Math.max(Math.sqrt(Math.max(LABEL_RING * LABEL_RING - dy * dy, 0)), 16);
+      const dy = p.item.labelY! - cy;
+      const dx = Math.max(Math.sqrt(Math.max(g.ring * g.ring - dy * dy, 0)), 16);
       p.item.labelDX = dir * dx;
     }
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function renderLabel(props: any) {
-  const { cx, cy, midAngle, pct, name, labelY, labelDX } = props as {
-    cx: number; cy: number; midAngle: number; pct: number; name: string;
-    labelY?: number; labelDX?: number;
+function makeRenderLabel(g: PieGeometry) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function renderLabel(props: any) {
+    const { cx, cy, midAngle, pct, name, labelY, labelDX } = props as {
+      cx: number; cy: number; midAngle: number; pct: number; name: string;
+      labelY?: number; labelDX?: number;
+    };
+    if (labelY == null || labelDX == null) return null;
+
+    const rad = -midAngle * RADIAN;
+    const isRight = labelDX >= 0;
+
+    // leader line: slice edge → elbow just before the label → label anchor
+    const sx = cx + g.outer * Math.cos(rad);
+    const sy = cy + g.outer * Math.sin(rad);
+    const lx = cx + labelDX;
+    const elbowX = lx - (isRight ? 6 : -6);
+
+    const label = `${name.length > 12 ? name.slice(0, 12) + '…' : name}: ${pct.toFixed(1)}%`;
+
+    return (
+      <g>
+        <polyline
+          points={`${sx},${sy} ${elbowX},${labelY} ${lx},${labelY}`}
+          stroke="#9ca3af"
+          strokeWidth={1}
+          fill="none"
+        />
+        <text
+          x={lx + (isRight ? 4 : -4)}
+          y={labelY}
+          textAnchor={isRight ? 'start' : 'end'}
+          dominantBaseline="central"
+          fontSize={g.font}
+          fontWeight={600}
+          fill="#374151"
+        >
+          {label}
+        </text>
+      </g>
+    );
   };
-  if (labelY == null || labelDX == null) return null;
-
-  const rad = -midAngle * RADIAN;
-  const isRight = labelDX >= 0;
-
-  // leader line: slice edge → elbow just before the label → label anchor
-  const sx = cx + OUTER_RADIUS * Math.cos(rad);
-  const sy = cy + OUTER_RADIUS * Math.sin(rad);
-  const lx = cx + labelDX;
-  const elbowX = lx - (isRight ? 6 : -6);
-
-  const label = `${name.length > 12 ? name.slice(0, 12) + '…' : name}: ${pct.toFixed(1)}%`;
-
-  return (
-    <g>
-      <polyline
-        points={`${sx},${sy} ${elbowX},${labelY} ${lx},${labelY}`}
-        stroke="#9ca3af"
-        strokeWidth={1}
-        fill="none"
-      />
-      <text
-        x={lx + (isRight ? 4 : -4)}
-        y={labelY}
-        textAnchor={isRight ? 'start' : 'end'}
-        dominantBaseline="central"
-        fontSize={10.5}
-        fontWeight={600}
-        fill="#374151"
-      >
-        {label}
-      </text>
-    </g>
-  );
 }
+
+// Stable identities so recharts doesn't see a new label fn every render
+const renderLabelFull = makeRenderLabel(FULL_GEOM);
+const renderLabelCompact = makeRenderLabel(COMPACT_GEOM);
 
 export default function AllocationPie({ holdings, cashBalance, currency, defaultGroupMode = 'holding', title, compact = false }: AllocationPieProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('market_value');
@@ -186,7 +198,8 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
           case 'loss': value = Math.abs(Math.min(0, h.unrealised_gain)); break;
           default: value = h.market_value;
         }
-        return { name: h.ticker, value };
+        // Display name only — strip the NSENG: routing prefix so NGX labels fit
+        return { name: h.ticker.replace(/^NSENG:/, ''), value };
       });
     } else {
       const sectorMap = new Map<string, number>();
@@ -214,7 +227,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
       .sort((a, b) => b.value - a.value)
       .map(i => ({ ...i, pct: total > 0 ? (i.value / total) * 100 : 0 }));
 
-    if (!compact) layoutLabels(data);
+    layoutLabels(data, compact ? COMPACT_GEOM : FULL_GEOM);
     return data;
   }
 
@@ -225,6 +238,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const pieData = useMemo(() => buildPieData(), [holdings, viewMode, groupMode, cashBalance, compact]);
   const totalValue = pieData.reduce((s, d) => s + d.value, 0);
+  const geom = compact ? COMPACT_GEOM : FULL_GEOM;
 
   const hoveredItem = hoveredIndex != null ? pieData[hoveredIndex] : null;
 
@@ -262,7 +276,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
         </div>
       ) : (
         <div className="relative">
-          <ResponsiveContainer width="100%" height={compact ? 260 : CHART_HEIGHT}>
+          <ResponsiveContainer width="100%" height={geom.height}>
             <PieChart>
               <Pie
                 data={pieData}
@@ -270,12 +284,12 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
                 cy="50%"
                 startAngle={90}
                 endAngle={-270}
-                innerRadius={compact ? 52 : INNER_RADIUS}
-                outerRadius={compact ? 78 : OUTER_RADIUS}
+                innerRadius={geom.inner}
+                outerRadius={geom.outer}
                 paddingAngle={1.5}
                 dataKey="value"
                 nameKey="name"
-                label={compact ? undefined : renderLabel}
+                label={compact ? renderLabelCompact : renderLabelFull}
                 labelLine={false}
                 strokeWidth={0}
                 onMouseLeave={() => setHoveredIndex(undefined)}
@@ -298,14 +312,14 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
             <div className="text-center">
               {hoveredItem ? (
                 <>
-                  <p className="text-xs text-gray-400 truncate max-w-[120px]">{hoveredItem.name}</p>
-                  <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(hoveredItem.value, currency)}</p>
+                  <p className={`text-xs text-gray-400 truncate ${compact ? 'max-w-[88px]' : 'max-w-[120px]'}`}>{hoveredItem.name}</p>
+                  <p className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums text-gray-900`}>{formatMoney(hoveredItem.value, currency)}</p>
                   <p className="text-xs tabular-nums text-gray-500">{hoveredItem.pct.toFixed(1)}%</p>
                 </>
               ) : (
                 <>
                   <p className="text-xs text-gray-400 uppercase">Total</p>
-                  <p className="text-lg font-bold tabular-nums text-gray-900">{formatMoney(totalValue, currency)}</p>
+                  <p className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums text-gray-900`}>{formatMoney(totalValue, currency)}</p>
                 </>
               )}
             </div>

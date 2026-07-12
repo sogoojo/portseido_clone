@@ -25,7 +25,7 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
             key={tab.href}
             href={tab.href}
             onClick={onNavigate}
-            className={`flex min-h-10 items-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex min-h-10 items-center rounded-md px-3 py-2 text-sm font-medium transition-colors lg:min-h-0 ${
               isActive
                 ? 'bg-gray-100 text-gray-900'
                 : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'

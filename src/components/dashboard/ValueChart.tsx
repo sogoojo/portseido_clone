@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useApi } from '@/lib/hooks';
 import {
-  AreaChart,
   Area,
   XAxis,
   YAxis,
@@ -59,10 +58,10 @@ export default function ValueChart() {
   const data = body?.data || [];
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-3 sm:p-5">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-sm font-medium text-gray-700">Portfolio Value Over Time</h3>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {RANGES.map(r => (
             <button
               key={r}

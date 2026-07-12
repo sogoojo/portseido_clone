@@ -153,7 +153,7 @@ export default function TransactionTable({ onEdit, onDelete, refreshKey }: Trans
             <button
               key={t}
               onClick={() => toggleType(t)}
-              className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors ${
+              className={`min-h-10 rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors sm:min-h-0 ${
                 filterTypes.includes(t) ? TYPE_COLORS[t] : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
               }`}
             >
@@ -166,20 +166,20 @@ export default function TransactionTable({ onEdit, onDelete, refreshKey }: Trans
           placeholder="Search ticker..."
           value={filterTicker}
           onChange={(e) => setFilterTicker(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
         />
         <input
           type="date"
           value={filterDateFrom}
           onChange={(e) => setFilterDateFrom(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
         />
         <span className="text-gray-400 text-sm">to</span>
         <input
           type="date"
           value={filterDateTo}
           onChange={(e) => setFilterDateTo(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
         />
         {(filterTypes.length > 0 || filterTicker || filterDateFrom || filterDateTo) && (
           <button

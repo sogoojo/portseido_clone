@@ -288,7 +288,6 @@ export default function SentimentTrends() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
     const days = PERIODS.find(p => p.key === period)!.days;
     const from = getFromDate(days);
     fetch(`/api/summaries?from=${from}&limit=20000`)
@@ -304,15 +303,20 @@ export default function SentimentTrends() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
           Sentiment Trends
         </h2>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {PERIODS.map(p => (
             <button
               key={p.key}
-              onClick={() => setPeriod(p.key)}
+              onClick={() => {
+                if (p.key !== period) {
+                  setLoading(true);
+                  setPeriod(p.key);
+                }
+              }}
               className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
                 period === p.key
                   ? 'bg-gray-900 text-white'

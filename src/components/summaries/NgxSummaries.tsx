@@ -110,7 +110,7 @@ function NgxCard({ s }: { s: NgxSummary }) {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-5 gap-1 border-t border-gray-100 pt-2.5">
+      <div className="mt-3 grid grid-cols-2 gap-1 border-t border-gray-100 pt-2.5 sm:grid-cols-5">
         <MomentumChip label="5D" value={s.ret_5d} />
         <MomentumChip label="1M" value={s.ret_1m} />
         <MomentumChip label="3M" value={s.ret_3m} />

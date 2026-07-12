@@ -343,8 +343,8 @@ export default function SummariesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-baseline gap-3">
           <h1 className="text-lg font-semibold text-gray-900">Daily Summaries</h1>
           {lastFetched && (
             <span className="text-[11px] text-gray-400">
@@ -353,7 +353,7 @@ export default function SummariesPage() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-[10px]">
+        <div className="flex flex-wrap items-center gap-2 text-[10px]">
           <span className="text-gray-400">Forward analyst outlook (~12mo) — best first:</span>
           <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Bullish</span>
           <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Neutral</span>
@@ -361,19 +361,19 @@ export default function SummariesPage() {
         </div>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <input
           type="text"
           placeholder="Filter by ticker..."
           value={ticker}
           onChange={e => setTicker(e.target.value.toUpperCase())}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
         />
         <input
           type="date"
           value={date}
           onChange={e => setDate(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
         />
         {date && (
           <button

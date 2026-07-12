@@ -45,7 +45,7 @@ export default function CounterfactualCard() {
       <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
         What if S&P 500?
       </h3>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
           <p className="text-xs text-gray-400">Your Portfolio</p>
           <p className="text-lg font-semibold tabular-nums text-gray-900">{formatMoney(data.your_value)}</p>

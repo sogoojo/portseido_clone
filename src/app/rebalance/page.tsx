@@ -78,7 +78,7 @@ export default function RebalancePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline justify-between">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <h1 className="text-lg font-semibold text-gray-900">Rebalance</h1>
         {data && (
           <span className="text-[11px] text-gray-400">

@@ -22,7 +22,7 @@ export default function AccountSelector() {
     <select
       value={selected}
       onChange={handleChange}
-      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      className="min-h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-auto sm:text-sm"
     >
       <option value="all">All Accounts</option>
       {accounts.map((a) => (

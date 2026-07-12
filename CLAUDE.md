@@ -41,7 +41,7 @@ Personal portfolio tracker — lightweight Portseido replacement. Single user, n
 - API routes return `{ data }` on success, `{ error, message }` on failure
 - All money values stored as REAL (float)
 - Green (#16a34a) for positive returns, red (#dc2626) for negative
-- Desktop-first, responsive as secondary concern
+- Desktop-first design; must remain fully usable on phones (see doc/specs/mobile-responsive.md)
 - Account selector persists across views via URL search param `?account=all`
 
 ## File Organisation

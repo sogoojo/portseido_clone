@@ -51,9 +51,18 @@ export default function Nav() {
       if (event.key === 'Escape') setDrawerOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
+    // If the viewport crosses to lg while open (e.g. tablet rotation), the
+    // drawer and hamburger both hide via lg:hidden — close it so the body
+    // scroll lock can't strand an unscrollable page with no visible control.
+    const desktop = window.matchMedia('(min-width: 1024px)');
+    const onDesktop = () => {
+      if (desktop.matches) setDrawerOpen(false);
+    };
+    desktop.addEventListener('change', onDesktop);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
+      desktop.removeEventListener('change', onDesktop);
     };
   }, [drawerOpen]);
 

@@ -267,7 +267,8 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-0 py-3 sm:p-5">
       {/* Title + group mode toggle */}
-      {(title || !compact) && <div className="flex items-center justify-between mb-3">
+      {/* px matches the mobile card's px-0: keep the header off the card edge */}
+      {(title || !compact) && <div className="flex items-center justify-between mb-3 px-3 sm:px-0">
         {title ? (
           <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
         ) : (

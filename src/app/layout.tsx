@@ -17,6 +17,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Portseido Lite",
   description: "Personal portfolio tracker",
+  appleWebApp: {
+    capable: true,
+    title: "Portseido",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {

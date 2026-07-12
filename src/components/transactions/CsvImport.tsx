@@ -111,7 +111,7 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        className="min-h-10 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:min-h-0"
       >
         Import CSV
       </button>
@@ -131,7 +131,7 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
         <select
           value={broker}
           onChange={(e) => setBroker(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:text-sm"
         >
           {BROKERS.map((b) => (
             <option key={b.key} value={b.key}>
@@ -142,7 +142,7 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
         <select
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="min-h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:min-h-0 sm:w-auto sm:text-sm"
         >
           <option value="">Select account</option>
           {accounts.map((a) => (
@@ -156,7 +156,7 @@ export default function CsvImport({ accounts, onImported }: CsvImportProps) {
           type="file"
           accept=".csv"
           onChange={handleFileChange}
-          className="text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50"
+          className="w-full max-w-full text-base text-gray-600 file:mr-3 file:min-h-10 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50 sm:w-auto sm:text-sm sm:file:min-h-0"
         />
       </div>
 

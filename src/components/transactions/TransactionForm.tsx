@@ -153,19 +153,19 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label={isEdit ? 'Edit Transaction' : 'Add Transaction'}
-        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+        className="mx-4 max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-lg bg-white p-4 shadow-xl sm:mx-0 sm:rounded-lg sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">
             {isEdit ? 'Edit Transaction' : 'Add Transaction'}
           </h2>
-          <button onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600 text-xl leading-none">
+          <button onClick={onClose} aria-label="Close" className="flex min-h-10 min-w-10 items-center justify-center text-xl leading-none text-gray-400 hover:text-gray-600 sm:min-h-0 sm:min-w-0">
             &times;
           </button>
         </div>
@@ -182,13 +182,13 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
           {/* Type */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {TYPES.map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setType(t)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
+                  className={`min-h-10 rounded-md px-3 py-2 text-sm font-medium capitalize transition-colors sm:min-h-0 sm:py-1.5 ${
                     type === t ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
@@ -199,13 +199,13 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
           </div>
 
           {/* Account + Date row */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
               <select
                 value={accountId}
                 onChange={(e) => handleAccountChange(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
               >
                 <option value="">Select account</option>
                 {accounts.map((a) => (
@@ -221,7 +221,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
               />
             </div>
           </div>
@@ -242,7 +242,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
 
           {/* Quantity + Price */}
           {needsQuantityPrice && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
                 <input
@@ -251,7 +251,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
                   min="0"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-base tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
                 />
               </div>
               <div>
@@ -262,7 +262,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
                   min="0"
                   value={pricePerUnit}
                   onChange={(e) => setPricePerUnit(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-base tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
                 />
               </div>
             </div>
@@ -278,19 +278,19 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
                 min="0"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-base tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
               />
             </div>
           )}
 
           {/* Currency + Commission row */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
               <select
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
               >
                 <option value="">Select</option>
                 <option value="EUR">EUR</option>
@@ -306,7 +306,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
                 min="0"
                 value={commission}
                 onChange={(e) => setCommission(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-base tabular-nums focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
               />
             </div>
           </div>
@@ -319,7 +319,7 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
             />
           </div>
 
@@ -367,14 +367,14 @@ export default function TransactionForm({ transaction, onClose, onSaved }: Trans
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="min-h-10 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:min-h-0"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+              className="min-h-10 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50 sm:min-h-0"
             >
               {submitting ? 'Saving...' : isEdit ? 'Update' : 'Add Transaction'}
             </button>

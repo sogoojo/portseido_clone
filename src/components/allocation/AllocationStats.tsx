@@ -25,7 +25,7 @@ export default function AllocationStats({ totalValue, holdingsCount, cashBalance
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
       {stats.map(s => (
         <div key={s.label} className="rounded-lg border border-gray-200 bg-white p-4 text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wider">{s.label}</p>

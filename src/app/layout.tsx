@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Nav from "@/components/layout/Nav";
 import { ToastProvider } from "@/components/ui/Toast";
@@ -17,6 +17,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Portseido Lite",
   description: "Personal portfolio tracker",
+  appleWebApp: {
+    capable: true,
+    title: "Portseido",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#16a34a",
 };
 
 export default function RootLayout({
@@ -31,9 +42,9 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-gray-50">
         <ToastProvider>
-          <div className="flex min-h-screen">
+          <div className="flex min-h-screen flex-col lg:flex-row">
             <Nav />
-            <main className="flex-1 min-w-0 px-6 py-6">
+            <main className="flex-1 min-w-0 px-4 py-4 lg:px-6 lg:py-6">
               {children}
             </main>
           </div>

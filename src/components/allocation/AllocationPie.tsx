@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PortfolioHolding } from '@/lib/types';
 
@@ -67,6 +67,25 @@ interface PieGeometry {
 }
 const FULL_GEOM: PieGeometry = { height: 475, inner: 93, outer: 131, ring: 155, minPct: 0.8, spacing: 15, font: 10.5 };
 const COMPACT_GEOM: PieGeometry = { height: 300, inner: 52, outer: 78, ring: 96, minPct: 0, spacing: 12, font: 9 };
+// A phone card is narrower than the viewport after main/card padding. Keep the
+// ring tight enough for leader labels to remain inside a 360px page.
+const MOBILE_GEOM: PieGeometry = { height: 360, inner: 54, outer: 76, ring: 88, minPct: 0.8, spacing: 13, font: 9.5 };
+
+const NARROW_QUERY = '(max-width: 640px)';
+
+function subscribeToNarrowViewport(onStoreChange: () => void): () => void {
+  const media = window.matchMedia(NARROW_QUERY);
+  media.addEventListener('change', onStoreChange);
+  return () => media.removeEventListener('change', onStoreChange);
+}
+
+function getNarrowSnapshot(): boolean {
+  return window.matchMedia(NARROW_QUERY).matches;
+}
+
+function useIsNarrow(): boolean {
+  return useSyncExternalStore(subscribeToNarrowViewport, getNarrowSnapshot, () => false);
+}
 
 interface PieDatum {
   name: string;
@@ -142,7 +161,8 @@ function makeRenderLabel(g: PieGeometry) {
     const lx = cx + labelDX;
     const elbowX = lx - (isRight ? 6 : -6);
 
-    const label = `${name.length > 12 ? name.slice(0, 12) + '…' : name}: ${pct.toFixed(1)}%`;
+    const maxNameLength = g === MOBILE_GEOM ? 6 : 12;
+    const label = `${name.length > maxNameLength ? name.slice(0, maxNameLength) + '…' : name}: ${pct.toFixed(1)}%`;
 
     return (
       <g>
@@ -171,11 +191,14 @@ function makeRenderLabel(g: PieGeometry) {
 // Stable identities so recharts doesn't see a new label fn every render
 const renderLabelFull = makeRenderLabel(FULL_GEOM);
 const renderLabelCompact = makeRenderLabel(COMPACT_GEOM);
+const renderLabelMobile = makeRenderLabel(MOBILE_GEOM);
 
 export default function AllocationPie({ holdings, cashBalance, currency, defaultGroupMode = 'holding', title, compact = false }: AllocationPieProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('market_value');
   const [groupMode, setGroupMode] = useState<GroupMode>(defaultGroupMode);
   const [hoveredIndex, setHoveredIndex] = useState<number | undefined>(undefined);
+  const isNarrow = useIsNarrow();
+  const geom = compact ? COMPACT_GEOM : isNarrow ? MOBILE_GEOM : FULL_GEOM;
 
   const VIEW_OPTIONS: { key: ViewMode; label: string }[] = [
     { key: 'market_value', label: 'Market Value' },
@@ -227,7 +250,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
       .sort((a, b) => b.value - a.value)
       .map(i => ({ ...i, pct: total > 0 ? (i.value / total) * 100 : 0 }));
 
-    layoutLabels(data, compact ? COMPACT_GEOM : FULL_GEOM);
+    layoutLabels(data, geom);
     return data;
   }
 
@@ -236,14 +259,13 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
   // flashing every slice label off and back on. Recompute only on real input
   // changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const pieData = useMemo(() => buildPieData(), [holdings, viewMode, groupMode, cashBalance, compact]);
+  const pieData = useMemo(() => buildPieData(), [holdings, viewMode, groupMode, cashBalance, compact, geom]);
   const totalValue = pieData.reduce((s, d) => s + d.value, 0);
-  const geom = compact ? COMPACT_GEOM : FULL_GEOM;
 
   const hoveredItem = hoveredIndex != null ? pieData[hoveredIndex] : null;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5">
+    <div className="rounded-lg border border-gray-200 bg-white px-0 py-3 sm:p-5">
       {/* Title + group mode toggle */}
       {(title || !compact) && <div className="flex items-center justify-between mb-3">
         {title ? (
@@ -289,7 +311,7 @@ export default function AllocationPie({ holdings, cashBalance, currency, default
                 paddingAngle={1.5}
                 dataKey="value"
                 nameKey="name"
-                label={compact ? renderLabelCompact : renderLabelFull}
+                label={compact ? renderLabelCompact : isNarrow ? renderLabelMobile : renderLabelFull}
                 labelLine={false}
                 strokeWidth={0}
                 onMouseLeave={() => setHoveredIndex(undefined)}

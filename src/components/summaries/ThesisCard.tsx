@@ -227,9 +227,9 @@ function ThesisEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-5 shadow-xl"
+        className="mx-4 max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-lg bg-white p-4 shadow-xl sm:mx-0 sm:rounded-lg sm:p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-gray-900">{ticker} — thesis &amp; sell rules</h3>
@@ -240,7 +240,7 @@ function ThesisEditor({
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as ThesisRole)}
-              className="mt-1 block rounded-md border border-gray-300 px-2 py-1 text-sm"
+              className="mt-1 block min-h-10 rounded-md border border-gray-300 px-2 py-1 text-base sm:min-h-0 sm:text-sm"
             >
               <option value="compounder">Compounder</option>
               <option value="trade">Trade</option>
@@ -254,7 +254,7 @@ function ThesisEditor({
               value={weight}
               onChange={(e) => setWeight(e.target.value)}
               placeholder="e.g. 5"
-              className="mt-1 block w-24 rounded-md border border-gray-300 px-2 py-1 text-sm"
+              className="mt-1 block min-h-10 w-24 rounded-md border border-gray-300 px-2 py-1 text-base sm:min-h-0 sm:text-sm"
             />
           </label>
         </div>
@@ -266,7 +266,7 @@ function ThesisEditor({
             onChange={(e) => setText(e.target.value)}
             rows={2}
             placeholder="The bull case in a line or two…"
-            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-base sm:text-sm"
           />
         </label>
 
@@ -274,8 +274,8 @@ function ThesisEditor({
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-700">Sell triggers</span>
             <div className="flex gap-2 text-[11px]">
-              <button onClick={addAuto} className="text-blue-600 hover:text-blue-800">+ auto</button>
-              <button onClick={addManual} className="text-blue-600 hover:text-blue-800">+ manual</button>
+              <button onClick={addAuto} className="min-h-10 text-blue-600 hover:text-blue-800 sm:min-h-0">+ auto</button>
+              <button onClick={addManual} className="min-h-10 text-blue-600 hover:text-blue-800 sm:min-h-0">+ manual</button>
             </div>
           </div>
           <p className="mt-0.5 text-[10px] text-gray-400">
@@ -291,7 +291,7 @@ function ThesisEditor({
                     <select
                       value={t.metric}
                       onChange={(e) => setMetric(t.id, e.target.value as ThesisTriggerMetric)}
-                      className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                      className="min-h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-base sm:min-h-0 sm:text-xs"
                     >
                       {METRICS.map((m) => (
                         <option key={m} value={m}>
@@ -305,7 +305,7 @@ function ThesisEditor({
                         value={t.param ?? ''}
                         onChange={(e) => updateTrigger(t.id, { param: e.target.value ? parseFloat(e.target.value) : null })}
                         placeholder={currentPrice ? `$${currentPrice.toFixed(0)}` : '$'}
-                        className="w-20 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                        className="min-h-10 w-24 rounded-md border border-gray-300 px-2 py-1 text-base sm:min-h-0 sm:w-20 sm:text-xs"
                       />
                     )}
                   </>
@@ -315,11 +315,11 @@ function ThesisEditor({
                     value={t.text}
                     onChange={(e) => updateTrigger(t.id, { text: e.target.value })}
                     placeholder="e.g. NRR falls below 115% two quarters"
-                    className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-xs"
+                    className="min-h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-base sm:min-h-0 sm:text-xs"
                   />
                 )}
                 <span className="text-[9px] uppercase text-gray-400">{t.kind}</span>
-                <button onClick={() => removeTrigger(t.id)} className="text-gray-400 hover:text-red-600">
+                <button onClick={() => removeTrigger(t.id)} className="min-h-10 min-w-10 text-gray-400 hover:text-red-600 sm:min-h-0 sm:min-w-0">
                   ✕
                 </button>
               </li>
@@ -329,20 +329,20 @@ function ThesisEditor({
 
         <div className="mt-5 flex items-center justify-between">
           {thesis ? (
-            <button onClick={remove} disabled={busy} className="text-xs text-red-600 hover:text-red-800">
+            <button onClick={remove} disabled={busy} className="min-h-10 text-xs text-red-600 hover:text-red-800 sm:min-h-0">
               Delete
             </button>
           ) : (
             <span />
           )}
           <div className="flex gap-2">
-            <button onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">
+            <button onClick={onClose} className="min-h-10 rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 sm:min-h-0 sm:py-1.5">
               Cancel
             </button>
             <button
               onClick={save}
               disabled={busy}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="min-h-10 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 sm:min-h-0 sm:py-1.5"
             >
               {busy ? 'Saving…' : 'Save'}
             </button>

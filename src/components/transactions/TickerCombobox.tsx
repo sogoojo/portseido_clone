@@ -79,7 +79,6 @@ export default function TickerCombobox({ value, onChange, options, preferCurrenc
       cancelled = true;
       clearTimeout(t);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, filtered.length]);
 
   const remoteResults = remote.filter((r) => !localSymbols.has(r.symbol.toUpperCase()));
@@ -149,7 +148,7 @@ export default function TickerCombobox({ value, onChange, options, preferCurrenc
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-base uppercase focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
       />
 
       {open && (totalRows > 0 || showAddNew || searching) && (

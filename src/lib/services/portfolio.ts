@@ -338,11 +338,14 @@ export async function getCashBalance(accountId: string): Promise<number> {
 
 // --- Portfolio Value ---
 
-export async function getPortfolioValue(accountId: string): Promise<{ value: number; currency: string; holdings_value: number; cash: number }> {
+export async function getPortfolioValue(
+  accountId: string,
+  holdingsSnapshot?: PortfolioHolding[]
+): Promise<{ value: number; currency: string; holdings_value: number; cash: number }> {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as Account | undefined;
   if (!account) throw new Error(`Account not found: ${accountId}`);
 
-  const holdings = await getHoldings(accountId);
+  const holdings = holdingsSnapshot ?? await getHoldings(accountId);
   const holdingsValue = holdings.reduce((sum, h) => sum + h.market_value, 0);
 
   const trackCash = account.track_cash !== 0;
@@ -376,14 +379,30 @@ export interface AggregateValue {
   accounts: AccountValue[];
 }
 
-export async function getAggregateValue(): Promise<AggregateValue> {
+export async function getAggregateValue(
+  aggregateHoldings?: PortfolioHolding[],
+  isolatedHoldings: PortfolioHolding[] = []
+): Promise<AggregateValue> {
+  if (!aggregateHoldings) {
+    const [holdings, isolated] = await Promise.all([getHoldings(), getHoldings('ngx')]);
+    return getAggregateValue(holdings, isolated);
+  }
+
   const accounts = db.prepare('SELECT * FROM accounts ORDER BY name').all() as Account[];
   const accountValues: AccountValue[] = [];
   let totalEur = 0;
   let totalUsd = 0;
 
   for (const account of accounts) {
-    const pv = await getPortfolioValue(account.id);
+    const source = account.currency === ISOLATED_CURRENCY ? isolatedHoldings : aggregateHoldings;
+    const displayedHoldingsValue = source
+      .filter(holding => holding.account_id === account.id)
+      .reduce((sum, holding) => sum + holding.market_value, 0);
+    const holdingsValue = account.currency === ISOLATED_CURRENCY
+      ? displayedHoldingsValue
+      : await convert(displayedHoldingsValue, 'USD', account.currency);
+    const cash = account.track_cash !== 0 ? await getCashBalance(account.id) : 0;
+    const pv = { value: holdingsValue + cash, currency: account.currency, holdings_value: holdingsValue, cash };
     const valueEur = await convert(pv.value, account.currency, 'EUR');
     const valueUsd = await convert(pv.value, account.currency, 'USD');
     const cashUsd = await convert(pv.cash, account.currency, 'USD');
@@ -454,9 +473,12 @@ export interface DailyPnL {
   yesterday: { amount: number; pct: number };
 }
 
-export async function getDailyPnL(accountId?: string): Promise<DailyPnL> {
+export async function getDailyPnL(
+  accountId?: string,
+  holdingsSnapshot?: PortfolioHolding[]
+): Promise<DailyPnL> {
   // Get current holdings and their prices
-  const holdings = await getHoldings(accountId);
+  const holdings = holdingsSnapshot ?? await getHoldings(accountId);
 
   // Holdings are valued in their account's currency — convert to USD when
   // aggregating across accounts
@@ -504,7 +526,10 @@ export interface AllTimePnL {
  * All-time P/L. Single account: in the account's currency.
  * Aggregate: converted to USD.
  */
-export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
+export async function getAllTimePnL(
+  accountId?: string,
+  holdingsSnapshot?: PortfolioHolding[]
+): Promise<AllTimePnL> {
   const aggregate = !accountId || accountId === 'all';
   // Aggregate view excludes the isolated (NGX) account from realised,
   // unrealised, cost basis and dividends alike (this condition feeds both).
@@ -546,7 +571,11 @@ export async function getAllTimePnL(accountId?: string): Promise<AllTimePnL> {
     totalRealised += await toDisplay(realisedInAcct, account_currency);
 
     // For open positions, compute unrealised gain
-    if (fifo.quantity > 0.0001) {
+    const snapshotHolding = holdingsSnapshot?.find(h => h.ticker === ticker && h.account_id === account_id);
+    if (fifo.quantity > 0.0001 && snapshotHolding) {
+      totalUnrealised += snapshotHolding.unrealised_gain;
+      totalCostBasis += snapshotHolding.cost_basis;
+    } else if (fifo.quantity > 0.0001) {
       const priceResult = await getCurrentPrice(ticker);
       const rawPrice = priceResult.price ?? 0;
       const priceCurrency = priceResult.currency || 'USD';

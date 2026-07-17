@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { getHistoricalPrices } from '@/lib/services/prices';
+import { ServerTiming } from '@/lib/server-timing';
 import { buildValuationContext } from '@/lib/services/history';
 
 interface HistoryDataPoint {
@@ -88,6 +89,7 @@ function generateDatePoints(from: Date, to: Date, granularity: 'daily' | 'monthl
 }
 
 export async function GET(request: NextRequest) {
+  const timing = new ServerTiming();
   const accountParam = request.nextUrl.searchParams.get('account') || 'all';
   const range = request.nextUrl.searchParams.get('range') || '1Y';
 
@@ -102,9 +104,10 @@ export async function GET(request: NextRequest) {
 
     // Valuation context handles FIFO replay, historical prices, FX-to-USD
     // conversion and track_cash — all values below are USD
-    const ctx = await buildValuationContext(
-      accountParam !== 'all' ? accountParam : undefined,
-      to
+    const ctx = await timing.measure(
+      'history',
+      () => buildValuationContext(accountParam !== 'all' ? accountParam : undefined, to),
+      'Historical prices and FX context'
     );
 
     // SPY for the benchmark overlay. Monthly date points snap to the 1st of
@@ -112,7 +115,7 @@ export async function GET(request: NextRequest) {
     // point (plus weekend lookback) so the first normalisation has a price.
     const spyFrom = new Date(datePoints[0]);
     spyFrom.setDate(spyFrom.getDate() - 7);
-    const spyRows = await getHistoricalPrices('SPY', spyFrom, to);
+    const spyRows = await timing.measure('benchmark', () => getHistoricalPrices('SPY', spyFrom, to));
     const spyMap = new Map(spyRows.map(r => [r.date, r.close]));
     function getSpyPrice(dateStr: string): number {
       if (spyMap.has(dateStr)) return spyMap.get(dateStr)!;
@@ -146,7 +149,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ data: dataPoints, currency: 'USD' });
+    const response = NextResponse.json({ data: dataPoints, currency: 'USD' });
+    response.headers.set('Server-Timing', timing.header());
+    return response;
   } catch (err) {
     console.error('[API/portfolio/history] Error:', err);
     return NextResponse.json(

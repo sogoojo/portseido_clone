@@ -571,12 +571,10 @@ export async function getAllTimePnL(
     totalRealised += await toDisplay(realisedInAcct, account_currency);
 
     // For open positions, compute unrealised gain
-    if (fifo.quantity > 0.0001 && holdingsSnapshot) {
-      const holding = holdingsSnapshot.find(h => h.ticker === ticker && h.account_id === account_id);
-      if (holding) {
-        totalUnrealised += holding.unrealised_gain;
-        totalCostBasis += holding.cost_basis;
-      }
+    const snapshotHolding = holdingsSnapshot?.find(h => h.ticker === ticker && h.account_id === account_id);
+    if (fifo.quantity > 0.0001 && snapshotHolding) {
+      totalUnrealised += snapshotHolding.unrealised_gain;
+      totalCostBasis += snapshotHolding.cost_basis;
     } else if (fifo.quantity > 0.0001) {
       const priceResult = await getCurrentPrice(ticker);
       const rawPrice = priceResult.price ?? 0;

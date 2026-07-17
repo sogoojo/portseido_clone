@@ -2,7 +2,7 @@ import db from '@/lib/db';
 import { getHistoricalPrices } from '@/lib/services/prices';
 import { convert } from '@/lib/services/fx';
 import { getPortfolioValue, getAggregateValue } from '@/lib/services/portfolio';
-import { buildValuationContext } from '@/lib/services/history';
+import { buildValuationContext, type ValuationContext } from '@/lib/services/history';
 
 // --- MWR / IRR via Newton-Raphson ---
 
@@ -106,20 +106,25 @@ export interface PeriodReturn {
   mwr: number | null;
 }
 
-export async function getPortfolioReturns(accountId?: string): Promise<PeriodReturn[]> {
+export async function getCurrentPortfolioValueUsd(accountId?: string): Promise<number> {
+  if (!accountId || accountId === 'all') {
+    const agg = await getAggregateValue();
+    return agg.total_usd;
+  }
+  const pv = await getPortfolioValue(accountId);
+  return convert(pv.value, pv.currency, 'USD');
+}
+
+export async function getPortfolioReturns(
+  accountId?: string,
+  options: { currentValue?: number; context?: ValuationContext } = {}
+): Promise<PeriodReturn[]> {
   const now = new Date();
 
   // Current portfolio value in USD (live prices)
-  let currentValue: number;
-  if (!accountId || accountId === 'all') {
-    const agg = await getAggregateValue();
-    currentValue = agg.total_usd;
-  } else {
-    const pv = await getPortfolioValue(accountId);
-    currentValue = await convert(pv.value, pv.currency, 'USD');
-  }
+  const currentValue = options.currentValue ?? await getCurrentPortfolioValueUsd(accountId);
 
-  const ctx = await buildValuationContext(accountId === 'all' ? undefined : accountId, now);
+  const ctx = options.context ?? await buildValuationContext(accountId === 'all' ? undefined : accountId, now);
   if (!ctx.firstDate) {
     return PERIODS.map(period => ({ period, mwr: null }));
   }
@@ -183,18 +188,22 @@ export interface BenchmarkReturn {
 export async function getBenchmarkReturns(symbol: string): Promise<BenchmarkReturn[]> {
   const now = new Date();
   const results: BenchmarkReturn[] = [];
+  const starts = PERIODS.map(period => ({ period, start: getPeriodStartDate(period) }));
+  const earliest = new Date(Math.min(...starts.map(item => item.start.getTime())));
+  // One complete series can answer every overlapping period. Fetching each
+  // range separately rereads the same SQLite rows eight times per benchmark.
+  const history = await getHistoricalPrices(symbol, earliest, now);
 
-  for (const period of PERIODS) {
-    const startDate = getPeriodStartDate(period);
-
+  for (const { period, start } of starts) {
     try {
-      const history = await getHistoricalPrices(symbol, startDate, now);
-      if (history.length < 2) {
+      const startStr = start.toISOString().split('T')[0];
+      const startIndex = history.findIndex(row => row.date >= startStr);
+      if (startIndex < 0 || history.length - startIndex < 2) {
         results.push({ period, return_pct: null });
         continue;
       }
 
-      const startPrice = history[0].close;
+      const startPrice = history[startIndex].close;
       const endPrice = history[history.length - 1].close;
       const returnPct = startPrice > 0 ? ((endPrice - startPrice) / startPrice) * 100 : null;
       results.push({ period, return_pct: returnPct });
@@ -216,10 +225,11 @@ export interface HistoricalReturn {
 
 export async function getHistoricalReturns(
   accountId?: string,
-  granularity: 'monthly' | 'quarterly' | 'annually' = 'monthly'
+  granularity: 'monthly' | 'quarterly' | 'annually' = 'monthly',
+  context?: ValuationContext
 ): Promise<HistoricalReturn[]> {
   const now = new Date();
-  const ctx = await buildValuationContext(accountId === 'all' ? undefined : accountId, now);
+  const ctx = context ?? await buildValuationContext(accountId === 'all' ? undefined : accountId, now);
   if (!ctx.firstDate) return [];
 
   const startDate = new Date(ctx.firstDate);

@@ -22,7 +22,7 @@ const DISPLAY_PERIODS = [
 
 export default function GainsReturnsPanel({ account }: GainsReturnsPanelProps) {
   const { data: body, loading } = useApi<{ data: { portfolio: PeriodReturn[] } }>(
-    `/api/performance?account=${account}`
+    `/api/performance?account=${account}&view=portfolio`
   );
   const returns = body?.data?.portfolio || [];
 
